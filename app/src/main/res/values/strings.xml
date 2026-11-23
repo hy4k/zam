@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">KinNest</string>
+    <string name="widget_description">Quick 1-tap family video call and Heartbeat check-in widget for Mithun, Mafitha, and Zayn Adam.</string>
+    <string name="call_notification_channel_name">Family Calls</string>
+    <string name="heartbeat_notification_channel_name">Family Heartbeat Alerts</string>
+    <string name="sync_notification_channel_name">Offline Sync</string>
+    <string name="login_subtitle">Our private 3-star family treehouse</string>
+    <string name="walkie_talkie_hold">HOLD TO TALK</string>
+    <string name="walkie_talkie_recording">LISTENING… RELEASE TO SEND</string>
+    <string name="accept_call">Accept</string>
+    <string name="decline_call">Decline</string>
+    <string name="quiet_hours_active">Quiet Hours Active — Gentle chimes only</string>
+</resources>

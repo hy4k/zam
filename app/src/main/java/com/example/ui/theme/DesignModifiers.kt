@@ -1,0 +1,241 @@
+package com.example.ui.theme
+
+import android.graphics.BlurMaskFilter
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.RenderEffect
+import android.graphics.Shader
+import android.os.Build
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+
+/**
+ * Liquid Glass Backdrop Blur Layer:
+ * Applies RenderEffect.createBlurEffect(25f, 25f, TileMode.CLAMP) on API 31+
+ * with graceful reduced-motion and legacy Android fallback.
+ */
+fun Modifier.liquidGlassBlurLayer(
+    radius: Float = 25f,
+    reducedMotion: Boolean = false
+): Modifier = this.graphicsLayer {
+    if (!reducedMotion && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        renderEffect = RenderEffect
+            .createBlurEffect(radius, radius, Shader.TileMode.CLAMP)
+            .asComposeRenderEffect()
+    }
+}
+
+/**
+ * Liquid Glass 2.0 Surface + Dual Specular Bevel Rim:
+ * Frosted multi-stop diagonal gradient + outer colored ambient shadow + 1.25dp specular rim.
+ */
+fun Modifier.liquidGlass(
+    shape: Shape = RoundedCornerShape(28.dp),
+    surfaceAlpha: Float = 0.55f,
+    tintColor: Color = Color.White,
+    applyBlur: Boolean = false,
+    reducedMotion: Boolean = false,
+    cornerRadius: Dp = 28.dp
+): Modifier {
+    val topFrost = tintColor.copy(alpha = (surfaceAlpha + 0.14f).coerceAtMost(0.92f))
+    val bottomFrost = tintColor.copy(alpha = (surfaceAlpha - 0.12f).coerceAtLeast(0.16f))
+    return this
+        .shadow(
+            elevation = 14.dp,
+            shape = shape,
+            clip = false,
+            ambientColor = StudioTealDeep.copy(alpha = 0.22f),
+            spotColor = StudioTealDeep.copy(alpha = 0.26f)
+        )
+        .clip(shape)
+        .then(if (applyBlur) Modifier.liquidGlassBlurLayer(25f, reducedMotion) else Modifier)
+        .background(
+            brush = Brush.linearGradient(
+                colors = listOf(topFrost, bottomFrost)
+            )
+        )
+        .drawBehind {
+            val strokePx = 1.25.dp.toPx()
+            val cornerPx = cornerRadius.toPx()
+            // Specular diagonal glass edge
+            drawRoundRect(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.78f),
+                        Color.White.copy(alpha = 0.18f),
+                        Color.White.copy(alpha = 0.42f)
+                    )
+                ),
+                cornerRadius = CornerRadius(cornerPx, cornerPx),
+                style = Stroke(width = strokePx)
+            )
+        }
+}
+
+/**
+ * Claymorphism 2.0 Sculpted 3D Toy Surface Formula:
+ * - Pillowy outer ambient shadow with surface-tinted glow
+ * - Vertical matte-sheen gradient (top slightly brighter, base deeper)
+ * - Dual inner inset depth inside drawWithContent:
+ *   1) Bottom-right BlurMaskFilter inset shadow (+4.dp offset)
+ *   2) Top-left crisp inner clay pillow highlight
+ *   3) Hairline specular rim for ultra-refined physical object depth
+ */
+fun Modifier.claymorphic(
+    cornerRadius: Dp = 28.dp,
+    surfaceColor: Color = Color.White,
+    elevation: Dp = 12.dp,
+    innerShadowAlpha: Float = 0.16f,
+    innerOffset: Dp = 4.dp
+): Modifier {
+    val shape = RoundedCornerShape(cornerRadius)
+    val topLit = lerp(surfaceColor, Color.White, 0.14f)
+    val bottomMatte = lerp(surfaceColor, Color.Black, 0.05f)
+
+    return this
+        .shadow(
+            elevation = elevation,
+            shape = shape,
+            clip = false,
+            ambientColor = surfaceColor.copy(alpha = 0.35f),
+            spotColor = Color(0xFF0F292E).copy(alpha = 0.28f)
+        )
+        .clip(shape)
+        .background(
+            brush = Brush.verticalGradient(
+                colors = listOf(topLit, surfaceColor, bottomMatte)
+            )
+        )
+        .drawWithContent {
+            drawContent()
+            val radiusPx = cornerRadius.toPx()
+            val offsetPx = innerOffset.toPx()
+            val blurPx = 9.dp.toPx()
+
+            drawIntoCanvas { canvas ->
+                val nativeCanvas = canvas.nativeCanvas
+                val saveCount = nativeCanvas.saveLayer(0f, 0f, size.width, size.height, null)
+
+                val clipPath = android.graphics.Path().apply {
+                    addRoundRect(
+                        RectF(0f, 0f, size.width, size.height),
+                        radiusPx,
+                        radiusPx,
+                        android.graphics.Path.Direction.CW
+                    )
+                }
+                nativeCanvas.clipPath(clipPath)
+
+                // Bottom-right inner inset shadow via BlurMaskFilter
+                val darkPaint = Paint().apply {
+                    isAntiAlias = true
+                    style = Paint.Style.STROKE
+                    strokeWidth = offsetPx * 2.4f
+                    color = Color.Black.copy(alpha = innerShadowAlpha).toArgb()
+                    maskFilter = BlurMaskFilter(blurPx, BlurMaskFilter.Blur.NORMAL)
+                }
+                nativeCanvas.drawRoundRect(
+                    RectF(
+                        -offsetPx,
+                        -offsetPx,
+                        size.width + offsetPx * 0.45f,
+                        size.height + offsetPx * 0.45f
+                    ),
+                    radiusPx,
+                    radiusPx,
+                    darkPaint
+                )
+
+                // Top-left pillowy clay highlight sheen
+                val highlightPaint = Paint().apply {
+                    isAntiAlias = true
+                    style = Paint.Style.STROKE
+                    strokeWidth = offsetPx * 1.8f
+                    color = Color.White.copy(alpha = 0.52f).toArgb()
+                    maskFilter = BlurMaskFilter(blurPx, BlurMaskFilter.Blur.NORMAL)
+                }
+                nativeCanvas.drawRoundRect(
+                    RectF(
+                        offsetPx * 0.3f,
+                        offsetPx * 0.3f,
+                        size.width + offsetPx,
+                        size.height + offsetPx
+                    ),
+                    radiusPx,
+                    radiusPx,
+                    highlightPaint
+                )
+
+                nativeCanvas.restoreToCount(saveCount)
+            }
+
+            // Crisp 1dp hairline rim
+            drawRoundRect(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.55f),
+                        Color.White.copy(alpha = 0.08f)
+                    )
+                ),
+                cornerRadius = CornerRadius(radiusPx, radiusPx),
+                style = Stroke(width = 1.dp.toPx())
+            )
+        }
+}
+
+/**
+ * Tactile spring bounce for child-friendly clay buttons; respects Reduced Motion accessibility.
+ */
+fun Modifier.clayPressScale(
+    enabled: Boolean = true,
+    reducedMotion: Boolean = false
+): Modifier = composed {
+    var pressed by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && enabled && !reducedMotion) 0.95f else 1f,
+        animationSpec = spring(dampingRatio = 0.58f, stiffness = 520f),
+        label = "clay_press_scale"
+    )
+    this
+        .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        }
+        .pointerInput(enabled) {
+            if (!enabled) return@pointerInput
+            detectTapGestures(
+                onPress = {
+                    pressed = true
+                    tryAwaitRelease()
+                    pressed = false
+                }
+            )
+        }
+}
