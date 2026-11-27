@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.BadgeElement
 import com.example.data.model.FamilyMemberId
@@ -20,9 +21,10 @@ import kotlinx.coroutines.sync.withLock
         EncryptedMessageEntity::class,
         MemoryCapsuleEntity::class,
         OfflineSyncQueueEntity::class,
-        FamilyActivityEntity::class
+        FamilyActivityEntity::class,
+        DailyComicPhotoEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class KinNestDatabase : RoomDatabase() {
@@ -39,12 +41,33 @@ abstract class KinNestDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `daily_comic_photos` (
+                        `dateKey` TEXT NOT NULL,
+                        `id` TEXT NOT NULL,
+                        `authorId` TEXT NOT NULL,
+                        `caption` TEXT NOT NULL,
+                        `comicStyle` TEXT NOT NULL,
+                        `localImagePath` TEXT NOT NULL,
+                        `reactionEmoji` TEXT,
+                        `createdAtMs` INTEGER NOT NULL,
+                        PRIMARY KEY(`dateKey`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         private fun buildDatabase(appContext: Context): KinNestDatabase {
             return Room.databaseBuilder(
                 appContext,
                 KinNestDatabase::class.java,
                 "kinnest_family_vault.db"
             )
+                .addMigrations(MIGRATION_1_2)
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         super.onCreate(db)
@@ -76,7 +99,7 @@ abstract class KinNestDatabase : RoomDatabase() {
                     UserProfileEntity(
                         memberId = FamilyMemberId.MITHUN.name,
                         displayName = "Mithun",
-                        roleLabel = "Papa",
+                        roleLabel = "Vapi",
                         customPhotoUri = null,
                         badgeElement = BadgeElement.COMPASS.name,
                         haloColorHex = 0xFF38BDF8,
@@ -88,7 +111,7 @@ abstract class KinNestDatabase : RoomDatabase() {
                     UserProfileEntity(
                         memberId = FamilyMemberId.MAFITHA.name,
                         displayName = "Mafitha",
-                        roleLabel = "Mama",
+                        roleLabel = "Ummi",
                         customPhotoUri = null,
                         badgeElement = BadgeElement.STARLIGHT.name,
                         haloColorHex = 0xFFFB7185,
@@ -132,7 +155,7 @@ abstract class KinNestDatabase : RoomDatabase() {
                         id = "mission_1",
                         kind = "MISSION",
                         title = "Blue Cushion Treasure Hunt",
-                        subtitle = "5-min indoor AR camera clue hunt: Find something round, soft, and blue!",
+                        subtitle = "5-min indoor camera treasure hunt: Find something round, soft, and blue!",
                         categoryOrTag = "AR_CLUE",
                         authorId = FamilyMemberId.MITHUN.name,
                         votesCount = 2,
@@ -145,7 +168,7 @@ abstract class KinNestDatabase : RoomDatabase() {
                         id = "mission_2",
                         kind = "MISSION",
                         title = "Kitchen Spice Detective",
-                        subtitle = "Snap a green leaf or cardamom pod with Mama & Papa on call!",
+                        subtitle = "Snap a green leaf or cardamom pod with Ummi & Vapi on call!",
                         categoryOrTag = "MINI_PUZZLE",
                         authorId = FamilyMemberId.MAFITHA.name,
                         votesCount = 3,
@@ -210,7 +233,7 @@ abstract class KinNestDatabase : RoomDatabase() {
                         id = "study_1",
                         kind = "STUDY",
                         title = "Phonics & Space Counting Board",
-                        subtitle = "Tap planets 1–10 and spell rocket words with Papa",
+                        subtitle = "Tap planets 1–10 and spell rocket words with Vapi",
                         categoryOrTag = "LITERACY",
                         authorId = FamilyMemberId.MITHUN.name,
                         votesCount = 2,
@@ -228,7 +251,7 @@ abstract class KinNestDatabase : RoomDatabase() {
                         authorId = FamilyMemberId.MAFITHA.name,
                         votesCount = 1,
                         costEstimate = "₹0 (emotional toll: priceless)",
-                        targetDateLabel = "Papa owes bedtime duty",
+                        targetDateLabel = "Vapi owes bedtime duty",
                         isCompleted = false,
                         timestampMs = now - 60_000L
                     ),
@@ -255,7 +278,7 @@ abstract class KinNestDatabase : RoomDatabase() {
                     id = "capsule_1",
                     authorId = FamilyMemberId.ZAYN.name,
                     title = "Adam's Rocket Joke",
-                    caption = "\"Papa, the moon is just cheese that forgot to go in the fridge!\"",
+                    caption = "\"Vapi, the moon is just cheese that forgot to go in the fridge!\"",
                     mediaType = "QUOTE_AUDIO",
                     mediaUri = null,
                     unlockAtMs = null,
@@ -268,7 +291,7 @@ abstract class KinNestDatabase : RoomDatabase() {
                     id = "capsule_2",
                     authorId = FamilyMemberId.MAFITHA.name,
                     title = "To Zayn on Your 7th Birthday",
-                    caption = "Time-locked surprise letter & voice recording from Mama & Papa.",
+                    caption = "Time-locked surprise letter & voice recording from Ummi & Vapi.",
                     mediaType = "TIME_CAPSULE",
                     mediaUri = null,
                     unlockAtMs = now + oneYearMs,

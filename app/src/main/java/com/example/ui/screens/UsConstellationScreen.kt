@@ -28,7 +28,6 @@ import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.FlightTakeoff
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -74,9 +73,7 @@ fun UsConstellationScreen(
     onToggleVaultPin: (String, Boolean) -> Unit,
     onVoteTravelPin: (String) -> Unit,
     onAddTravelPin: (title: String, subtitle: String, cost: String, countdown: String) -> Unit,
-    onOpenParentalSettings: () -> Unit,
-    onOpenPermissionsRecovery: () -> Unit,
-    onSignOut: () -> Unit
+    onOpenParentalSettings: () -> Unit
 ) {
     val travelPins = activities.filter { it.kind == "TRAVEL_PIN" }
     val calendarItems = activities.filter { it.kind == "CALENDAR" }
@@ -93,34 +90,21 @@ fun UsConstellationScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Parent Mode & Permissions / Sync Recovery Header Actions
+        // Parent Corner Action
         item {
-            Row(
+            ClayActionButton(
+                text = "Vapi & Ummi's Corner",
+                containerColor = PurpleChest,
+                icon = Icons.Rounded.AdminPanelSettings,
+                testTag = "open_parental_settings_button",
                 modifier = Modifier
                     .widthIn(max = 600.dp)
                     .fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                ClayActionButton(
-                    text = "Parent Vault (PIN/Bio)",
-                    containerColor = PurpleChest,
-                    icon = Icons.Rounded.AdminPanelSettings,
-                    testTag = "open_parental_settings_button",
-                    modifier = Modifier.weight(1f),
-                    onClick = onOpenParentalSettings
-                )
-                ClayActionButton(
-                    text = "Sync & Perms",
-                    containerColor = MintTreehouseDeep,
-                    icon = Icons.Rounded.Settings,
-                    testTag = "open_recovery_settings_button",
-                    modifier = Modifier.weight(1f),
-                    onClick = onOpenPermissionsRecovery
-                )
-            }
+                onClick = onOpenParentalSettings
+            )
         }
 
-        // Memory Capsules & Private Photo Vault
+        // Family Memory Capsules
         item {
             Row(
                 modifier = Modifier
@@ -129,8 +113,8 @@ fun UsConstellationScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 EditorialSectionHeader(
-                    eyebrow = "Encrypted Keepsakes",
-                    title = "Memory Capsules & Vault",
+                    eyebrow = "Family Keepsakes",
+                    title = "Memory Capsules",
                     accentColor = OchreGold,
                     modifier = Modifier.weight(1f)
                 )
@@ -188,7 +172,7 @@ fun UsConstellationScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.CloudDone,
-                                contentDescription = "Offline Vault Pin",
+                                contentDescription = "Save memory on this phone",
                                 tint = if (capsule.isVaultOfflinePinned) MintTreehouseDeep else MaterialTheme.colorScheme.outline
                             )
                         }
@@ -203,7 +187,7 @@ fun UsConstellationScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "Saved by ${author.displayName} • ${if (capsule.isVaultOfflinePinned) "Pinned Offline in Encrypted Vault" else "Cloud Only"}",
+                        text = "Saved by ${author.displayName} • ${if (capsule.isVaultOfflinePinned) "Saved on this phone" else "Online"}",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -372,19 +356,6 @@ fun UsConstellationScreen(
                     }
                 }
             }
-        }
-
-        item {
-            ClayActionButton(
-                text = "Switch Family Avatar",
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                testTag = "switch_avatar_signout_button",
-                modifier = Modifier
-                    .widthIn(max = 600.dp)
-                    .fillMaxWidth(),
-                onClick = onSignOut
-            )
         }
 
         item { Spacer(modifier = Modifier.height(16.dp)) }

@@ -77,4 +77,13 @@ interface KinNestDao {
 
     @Query("UPDATE family_activities SET isCompleted = :completed WHERE id = :id")
     suspend fun setActivityCompleted(id: String, completed: Boolean)
+
+    @Query("SELECT * FROM daily_comic_photos ORDER BY dateKey DESC")
+    fun observeDailyComicPhotos(): Flow<List<DailyComicPhotoEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertDailyComicPhoto(photo: DailyComicPhotoEntity)
+
+    @Query("UPDATE daily_comic_photos SET reactionEmoji = :emoji WHERE dateKey = :dateKey")
+    suspend fun updateDailyComicReaction(dateKey: String, emoji: String?)
 }

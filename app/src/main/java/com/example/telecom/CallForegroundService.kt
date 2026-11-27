@@ -47,8 +47,8 @@ class CallForegroundService : Service() {
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ACTIVE_CALL)
             .setSmallIcon(R.mipmap.ic_launcher_round)
-            .setContentTitle("KinNest Live Call Active")
-            .setContentText("Connected with $participantsLabel • LiveKit SFU")
+            .setContentTitle("Holy Moly ! Family Call")
+            .setContentText("On a call with $participantsLabel")
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setContentIntent(tapIntent)

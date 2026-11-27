@@ -26,14 +26,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Cottage
 import androidx.compose.material.icons.rounded.Forum
+import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.RocketLaunch
 import androidx.compose.material.icons.rounded.Sync
-import androidx.compose.material.icons.rounded.Toys
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRail
@@ -70,22 +69,33 @@ import com.example.data.model.OfflineSyncState
 import com.example.data.model.defaultAvatarRes
 import com.example.data.model.haloColor
 import com.example.ui.WorkspaceTab
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import com.example.ui.theme.CitrusLime
 import com.example.ui.theme.CoralSalmon
 import com.example.ui.theme.CrimsonDecline
 import com.example.ui.theme.DarkBackgroundBottom
 import com.example.ui.theme.DarkBackgroundTop
+import com.example.ui.theme.EmeraldAccept
 import com.example.ui.theme.LightBackgroundBottom
 import com.example.ui.theme.LightBackgroundTop
 import com.example.ui.theme.LocalKinNestAccessibility
 import com.example.ui.theme.OchreGold
 import com.example.ui.theme.OchreGoldBright
 import com.example.ui.theme.OchreGoldSoft
-import com.example.ui.theme.OrchidPink
-import com.example.ui.theme.PeriwinklePop
 import com.example.ui.theme.PowderSky
 import com.example.ui.theme.StudioTeal
 import com.example.ui.theme.StudioTealDeep
+import com.example.ui.theme.TabLightCall
+import com.example.ui.theme.TabLightChat
+import com.example.ui.theme.TabLightHome
+import com.example.ui.theme.TabLightPlay
 import com.example.ui.theme.clayPressScale
 import com.example.ui.theme.claymorphic
 import com.example.ui.theme.liquidGlass
@@ -410,6 +420,7 @@ fun FamilyMemberAvatar(
     badge: BadgeElement = BadgeElement.STARLIGHT,
     size: Dp = 64.dp,
     showBadge: Boolean = true,
+    isOnline: Boolean? = null,
     modifier: Modifier = Modifier
 ) {
     val halo = member.haloColor()
@@ -441,6 +452,17 @@ fun FamilyMemberAvatar(
                     modifier = Modifier.fillMaxSize()
                 )
             }
+        }
+        if (isOnline != null) {
+            val dotSize = (size * 0.24f).coerceIn(11.dp, 18.dp)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(dotSize)
+                    .clip(CircleShape)
+                    .background(if (isOnline) EmeraldAccept else Color(0xFF94A3B8))
+                    .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+            )
         }
         if (showBadge) {
             Surface(
@@ -513,9 +535,10 @@ fun ClayActionButton(
 }
 
 /**
- * Dimensional 5-Tab Studio Glass Dock with Claymorphic Active Pill.
- * Uses crisp frosted surface opacity and an edge rim so it remains unmistakably visible
- * over any scrolled content and safe from system navigation bars.
+ * Sculpted Liquid Glass Light-Up Bottom Menu Dock:
+ * Inspired by the attached translucent Liquid Glass light switch + ocean/coral/butter palette.
+ * Tapping any menu item smoothly "switches ON" a glowing liquid glass orb & luminous under-glow
+ * in that tab's signature color.
  */
 @Composable
 fun KinNestToyBottomDock(
@@ -525,56 +548,162 @@ fun KinNestToyBottomDock(
     modifier: Modifier = Modifier
 ) {
     val a11y = LocalKinNestAccessibility.current
+    val (_, activeGlowColor) = tabVisuals(selectedTab)
+    val animatedBarGlow by animateColorAsState(
+        targetValue = activeGlowColor,
+        animationSpec = spring(dampingRatio = 0.75f, stiffness = 260f),
+        label = "dock_bar_glow"
+    )
+    val isDarkSurface = MaterialTheme.colorScheme.background.red < 0.25f
+    val glassBaseTop = if (isDarkSurface) Color(0xCC1B3447) else Color(0xD8ECECEC)
+    val glassBaseBottom = if (isDarkSurface) Color(0xB80E202E) else Color(0xC2DFE6EC)
+    val inactiveTint = if (isDarkSurface) Color(0xFFB5CBD4) else Color(0xFF475569)
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
+        // Outer sculpted Liquid Glass capsule with subtle ambient glow from the active "switched-on" tab
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .liquidGlass(
-                    shape = RoundedCornerShape(32.dp),
-                    surfaceAlpha = 0.90f,
-                    tintColor = MaterialTheme.colorScheme.surface,
-                    applyBlur = false,
-                    reducedMotion = a11y.reducedMotion,
-                    cornerRadius = 32.dp
+                .shadow(
+                    elevation = 18.dp,
+                    shape = RoundedCornerShape(36.dp),
+                    clip = false,
+                    ambientColor = animatedBarGlow.copy(alpha = 0.42f),
+                    spotColor = animatedBarGlow.copy(alpha = 0.48f)
                 )
-                .border(
-                    width = 1.25.dp,
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
-                    shape = RoundedCornerShape(32.dp)
+                .clip(RoundedCornerShape(36.dp))
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(glassBaseTop, glassBaseBottom)
+                    )
                 )
-                .padding(horizontal = 7.dp, vertical = 8.dp)
+                .drawBehind {
+                    val cornerPx = 36.dp.toPx()
+                    // Soft inner ambient light spill from the active switched-on tab
+                    drawRoundRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                animatedBarGlow.copy(alpha = 0.16f),
+                                Color.Transparent
+                            ),
+                            center = Offset(
+                                x = size.width * ((selectedTab.index + 0.5f) / WorkspaceTab.entries.size),
+                                y = size.height * 0.6f
+                            ),
+                            radius = size.width * 0.34f
+                        ),
+                        cornerRadius = CornerRadius(cornerPx, cornerPx)
+                    )
+                    // Specular liquid glass bevel rim (bright white top highlight + crisp reflective bottom)
+                    drawRoundRect(
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.88f),
+                                Color.White.copy(alpha = 0.22f),
+                                Color.White.copy(alpha = 0.62f)
+                            )
+                        ),
+                        cornerRadius = CornerRadius(cornerPx, cornerPx),
+                        style = Stroke(width = 1.5.dp.toPx())
+                    )
+                }
+                .padding(horizontal = 6.dp, vertical = 7.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 WorkspaceTab.entries.forEach { tab ->
                     val isSelected = tab == selectedTab
-                    val (icon, tabColor) = tabVisuals(tab)
+                    val (icon, tabLightColor) = tabVisuals(tab)
+                    val lightIntensity by animateFloatAsState(
+                        targetValue = if (isSelected) 1f else 0f,
+                        animationSpec = if (a11y.reducedMotion) tween(100) else spring(
+                            dampingRatio = 0.62f,
+                            stiffness = 380f
+                        ),
+                        label = "tab_light_${tab.name}"
+                    )
+                    val iconScale by animateFloatAsState(
+                        targetValue = if (isSelected && !a11y.reducedMotion) 1.12f else 1f,
+                        animationSpec = spring(dampingRatio = 0.52f, stiffness = 420f),
+                        label = "tab_scale_${tab.name}"
+                    )
+
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(60.dp)
-                            .clayPressScale(reducedMotion = a11y.reducedMotion)
-                            .clip(RoundedCornerShape(22.dp))
-                            .then(
-                                if (isSelected) {
-                                    Modifier.claymorphic(
-                                        cornerRadius = 22.dp,
-                                        surfaceColor = tabColor,
-                                        elevation = 8.dp
+                            .height(64.dp)
+                            .drawBehind {
+                                if (lightIntensity > 0.02f) {
+                                    // Luminous under-glow spilling beneath the switched-on glass pill (Image 1 effect)
+                                    drawCircle(
+                                        brush = Brush.radialGradient(
+                                            colors = listOf(
+                                                Color.White.copy(alpha = 0.72f * lightIntensity),
+                                                tabLightColor.copy(alpha = 0.55f * lightIntensity),
+                                                Color.Transparent
+                                            ),
+                                            center = Offset(size.width * 0.5f, size.height * 0.78f),
+                                            radius = size.maxDimension * 0.68f
+                                        ),
+                                        center = Offset(size.width * 0.5f, size.height * 0.78f),
+                                        radius = size.maxDimension * 0.68f
                                     )
-                                } else {
-                                    Modifier
                                 }
+                            }
+                            .clip(RoundedCornerShape(28.dp))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = { onSelectTab(tab) }
                             )
-                            .clickable { onSelectTab(tab) }
+                            .drawBehind {
+                                if (lightIntensity > 0.02f) {
+                                    val r = 28.dp.toPx()
+                                    // Sculpted translucent Liquid Glass lens pill tinted with the tab's illuminated color
+                                    drawRoundRect(
+                                        brush = Brush.verticalGradient(
+                                            colors = listOf(
+                                                tabLightColor.copy(alpha = 0.88f * lightIntensity),
+                                                tabLightColor.copy(alpha = 0.68f * lightIntensity)
+                                            )
+                                        ),
+                                        cornerRadius = CornerRadius(r, r)
+                                    )
+                                    // Glossy top-dome liquid glass reflection highlight
+                                    drawRoundRect(
+                                        brush = Brush.verticalGradient(
+                                            colors = listOf(
+                                                Color.White.copy(alpha = 0.56f * lightIntensity),
+                                                Color.White.copy(alpha = 0.08f * lightIntensity),
+                                                Color.Transparent
+                                            ),
+                                            startY = 0f,
+                                            endY = size.height * 0.58f
+                                        ),
+                                        cornerRadius = CornerRadius(r, r)
+                                    )
+                                    // Crisp liquid glass specular rim
+                                    drawRoundRect(
+                                        brush = Brush.linearGradient(
+                                            colors = listOf(
+                                                Color.White.copy(alpha = 0.95f * lightIntensity),
+                                                Color.White.copy(alpha = 0.35f * lightIntensity),
+                                                Color.White.copy(alpha = 0.75f * lightIntensity)
+                                            )
+                                        ),
+                                        cornerRadius = CornerRadius(r, r),
+                                        style = Stroke(width = 1.5.dp.toPx())
+                                    )
+                                }
+                            }
                             .testTag("tab_${tab.name.lowercase()}"),
                         contentAlignment = Alignment.Center
                     ) {
@@ -582,21 +711,49 @@ fun KinNestToyBottomDock(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
-                            Box {
+                            Box(contentAlignment = Alignment.Center) {
+                                // Illuminated bulb halo directly behind the icon when switched ON
+                                if (lightIntensity > 0.05f) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .drawBehind {
+                                                drawCircle(
+                                                    brush = Brush.radialGradient(
+                                                        colors = listOf(
+                                                            Color.White.copy(alpha = 0.75f * lightIntensity),
+                                                            Color.White.copy(alpha = 0.18f * lightIntensity),
+                                                            Color.Transparent
+                                                        )
+                                                    )
+                                                )
+                                            }
+                                    )
+                                }
                                 Icon(
                                     imageVector = icon,
-                                    contentDescription = tab.label,
-                                    tint = if (isSelected) Color.White else tabColor,
-                                    modifier = Modifier.size(23.dp)
+                                    contentDescription = tab.accessibleTitle,
+                                    tint = if (isSelected) {
+                                        if (tab == WorkspaceTab.PLAY) Color(0xFF0D1B2A) else Color.White
+                                    } else {
+                                        inactiveTint
+                                    },
+                                    modifier = Modifier
+                                        .size(23.dp)
+                                        .graphicsLayer {
+                                            scaleX = iconScale
+                                            scaleY = iconScale
+                                        }
                                 )
                                 if (tab == WorkspaceTab.CHAT && unreadCount > 0) {
                                     Box(
                                         modifier = Modifier
                                             .align(Alignment.TopEnd)
-                                            .offset(x = 6.dp, y = (-4).dp)
+                                            .offset(x = 8.dp, y = (-4).dp)
                                             .size(16.dp)
                                             .clip(CircleShape)
-                                            .background(CrimsonDecline),
+                                            .background(CrimsonDecline)
+                                            .border(1.dp, Color.White, CircleShape),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
@@ -608,12 +765,20 @@ fun KinNestToyBottomDock(
                                     }
                                 }
                             }
-                            Spacer(modifier = Modifier.height(3.dp))
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = tab.label.uppercase(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1
+                                text = tab.label,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                    letterSpacing = 0.6.sp
+                                ),
+                                color = if (isSelected) {
+                                    if (tab == WorkspaceTab.PLAY) Color(0xFF0D1B2A) else Color.White
+                                } else {
+                                    inactiveTint
+                                },
+                                maxLines = 1,
+                                overflow = TextOverflow.Clip
                             )
                         }
                     }
@@ -621,23 +786,6 @@ fun KinNestToyBottomDock(
             }
         }
     }
-}
-
-/**
- * Landing-Screen Floating Glassmorphic Bottom Menu Bar:
- * Ensures immediate 1-tap access to core family spaces right from the Landing Page.
- */
-@Composable
-fun LandingBottomMenuBar(
-    onSelectWorkspaceTab: (WorkspaceTab) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    KinNestToyBottomDock(
-        selectedTab = WorkspaceTab.HOME,
-        unreadCount = 0,
-        onSelectTab = onSelectWorkspaceTab,
-        modifier = modifier
-    )
 }
 
 @Composable
@@ -657,7 +805,7 @@ fun KinNestNavigationRail(
                 icon = {
                     Icon(
                         imageVector = icon,
-                        contentDescription = tab.label,
+                        contentDescription = tab.accessibleTitle,
                         tint = tabColor
                     )
                 },
@@ -669,19 +817,17 @@ fun KinNestNavigationRail(
 }
 
 private fun tabVisuals(tab: WorkspaceTab): Pair<ImageVector, Color> = when (tab) {
-    WorkspaceTab.HOME -> Icons.Rounded.Cottage to StudioTeal
-    WorkspaceTab.CALL -> Icons.Rounded.RocketLaunch to PeriwinklePop
-    WorkspaceTab.CHAT -> Icons.Rounded.Forum to CoralSalmon
-    WorkspaceTab.PLAY -> Icons.Rounded.Toys to OrchidPink.copy(red = 0.78f, green = 0.28f, blue = 0.86f)
-    WorkspaceTab.US -> Icons.Rounded.AutoAwesome to OchreGold
+    WorkspaceTab.HOME -> Icons.Rounded.Cottage to TabLightHome
+    WorkspaceTab.CALL -> Icons.Rounded.RocketLaunch to TabLightCall
+    WorkspaceTab.CHAT -> Icons.Rounded.Forum to TabLightChat
+    WorkspaceTab.PLAY -> Icons.Rounded.GridView to TabLightPlay
 }
 
 @Composable
 fun OfflineAndQuietStatusBanners(
     syncState: OfflineSyncState,
     quietHoursActive: Boolean,
-    onRetrySync: () -> Unit,
-    onOpenRecovery: () -> Unit
+    onRetrySync: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -702,31 +848,29 @@ fun OfflineAndQuietStatusBanners(
                         },
                         elevation = 6.dp
                     )
-                    .clickable {
-                        if (syncState.failedQueueCount > 0) onOpenRecovery() else onRetrySync()
-                    }
+                    .clickable(onClick = onRetrySync)
                     .padding(horizontal = 14.dp, vertical = 10.dp)
                     .testTag("offline_sync_banner"),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = if (!syncState.isOnline) Icons.Rounded.CloudOff else Icons.Rounded.Sync,
-                    contentDescription = "Offline sync status",
+                    contentDescription = "Connection status",
                     tint = Color(0xFF78350F)
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = when {
-                            !syncState.isOnline -> "Offline Vault Active • Queued locally"
-                            syncState.failedQueueCount > 0 -> "${syncState.failedQueueCount} uploads need retry"
-                            else -> "Syncing ${syncState.pendingQueueCount} family items…"
+                            !syncState.isOnline -> "No internet right now — saved for later"
+                            syncState.failedQueueCount > 0 -> "Some messages are waiting to send"
+                            else -> "Sending family updates…"
                         },
                         style = MaterialTheme.typography.labelLarge,
                         color = Color(0xFF78350F)
                     )
                     Text(
-                        text = if (syncState.failedQueueCount > 0) "Tap to open Retry Manager" else syncState.lastSyncedLabel,
+                        text = if (syncState.failedQueueCount > 0) "Tap to try again" else syncState.lastSyncedLabel,
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color(0xFF92400E)
                     )
@@ -755,7 +899,7 @@ fun OfflineAndQuietStatusBanners(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Quiet Hours Active — Gentle chimes & muted TTS",
+                    text = "Quiet Hours On — Soft chimes only",
                     style = MaterialTheme.typography.bodyMedium,
                     color = StudioTealDeep,
                     fontWeight = FontWeight.SemiBold

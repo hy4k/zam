@@ -1,8 +1,12 @@
 package com.example.media
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.os.Build
+import android.util.Log
+import androidx.core.content.ContextCompat
 import com.example.BuildConfig
 import com.example.data.model.ArFilterType
 import com.example.data.model.AudioRoute
@@ -13,10 +17,12 @@ import io.livekit.android.RoomOptions
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
 import io.livekit.android.room.Room
-import io.livekit.android.room.participant.LocalParticipant
-import io.livekit.android.room.track.CameraPosition
+import io.livekit.android.room.track.LocalVideoTrack
+import io.livekit.android.room.track.Track
+import io.livekit.android.room.track.VideoTrack
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -63,6 +69,7 @@ sealed interface LiveKitDataPacket {
  * LiveKit SFU Subsystem:
  * - Adaptive video streaming + Dynacast for simultaneous 3-way full-duplex calling
  * - Hardware-accelerated H.264/VP9 video & Opus audio with Android AEC, NS, and AGC
+ * - Real local & remote VideoTrack exposure for TextureViewRenderer playback
  * - DataChannel broadcasting for AR filters, emoji physics bursts, tap pulses, and live drawing
  */
 class LiveKitCallEngine(private val context: Context) {
@@ -72,17 +79,34 @@ class LiveKitCallEngine(private val context: Context) {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private var room: Room? = null
+    private var roomEventsJob: Job? = null
+    private var localMember: FamilyMemberId = FamilyMemberId.MITHUN
+
+    private val _activeRoom = MutableStateFlow<Room?>(null)
+    val activeRoom: StateFlow<Room?> = _activeRoom.asStateFlow()
 
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
+    private val _isLiveStreamActive = MutableStateFlow(false)
+    val isLiveStreamActive: StateFlow<Boolean> = _isLiveStreamActive.asStateFlow()
+
+    private val _connectionStatusLabel = MutableStateFlow("Ready to call")
+    val connectionStatusLabel: StateFlow<String> = _connectionStatusLabel.asStateFlow()
+
+    private val _videoTracksByMember = MutableStateFlow<Map<FamilyMemberId, VideoTrack>>(emptyMap())
+    val videoTracksByMember: StateFlow<Map<FamilyMemberId, VideoTrack>> = _videoTracksByMember.asStateFlow()
+
+    private val _connectedLiveMembers = MutableStateFlow<Set<FamilyMemberId>>(emptySet())
+    val connectedLiveMembers: StateFlow<Set<FamilyMemberId>> = _connectedLiveMembers.asStateFlow()
+
+    private val _speakingMembers = MutableStateFlow<Set<FamilyMemberId>>(emptySet())
+    val speakingMembers: StateFlow<Set<FamilyMemberId>> = _speakingMembers.asStateFlow()
+
     private val _incomingDataPackets = MutableSharedFlow<LiveKitDataPacket>(extraBufferCapacity = 32)
     val incomingDataPackets: SharedFlow<LiveKitDataPacket> = _incomingDataPackets.asSharedFlow()
 
-    fun isLiveKitEndpointConfigured(): Boolean {
-        val url = BuildConfig.LIVEKIT_WS_URL
-        return url.isNotBlank() && !url.contains("your-livekit-instance")
-    }
+    fun isLiveKitEndpointConfigured(): Boolean = LiveKitTokenProvider.isLiveKitUrlConfigured()
 
     fun getOrCreateRoom(): Room {
         return room ?: LiveKit.create(
@@ -93,41 +117,81 @@ class LiveKitCallEngine(private val context: Context) {
             )
         ).also { created ->
             room = created
+            _activeRoom.value = created
         }
     }
 
     suspend fun connectToFamilyRoom(
-        token: String,
+        member: FamilyMemberId,
+        roomName: String = DEFAULT_FAMILY_ROOM,
         enableMic: Boolean = true,
         enableCamera: Boolean = true
-    ): Result<Unit> {
+    ): Result<Boolean> {
+        localMember = member
         configureCommunicationAudio(AudioRoute.SPEAKER)
-        if (!isLiveKitEndpointConfigured() || token.isBlank()) {
-            // Safe offline/preview mode until Secrets LIVEKIT_WS_URL + room token are configured
+        _connectionStatusLabel.value = "Connecting your call…"
+
+        val tokenResult = LiveKitTokenProvider.obtainRoomToken(member, roomName)
+        if (tokenResult !is LiveKitTokenResult.Ready) {
+            val reason = when (tokenResult) {
+                is LiveKitTokenResult.MissingConfig -> tokenResult.reason
+                is LiveKitTokenResult.Failed -> tokenResult.reason
+                else -> "Token unavailable"
+            }
+            Log.w("LiveKitCallEngine", "Falling back to preview: $reason")
+            _isLiveStreamActive.value = false
             _isConnected.value = true
-            return Result.success(Unit)
+            _connectionStatusLabel.value = "Waiting for family to join…"
+            return Result.success(false)
         }
+
+        val hasAudioPerm = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasCameraPerm = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val publishAudio = enableMic && hasAudioPerm
+        val publishCamera = enableCamera && hasCameraPerm
 
         return runCatching {
             val lkRoom = getOrCreateRoom()
+            observeRoomEvents(lkRoom)
+
             val connectOptions = ConnectOptions(
-                audio = enableMic,
-                video = enableCamera
+                audio = publishAudio,
+                video = publishCamera
             )
             lkRoom.connect(
-                url = BuildConfig.LIVEKIT_WS_URL,
-                token = token,
+                url = BuildConfig.LIVEKIT_WS_URL.trim(),
+                token = tokenResult.token,
                 options = connectOptions
             )
-            lkRoom.localParticipant.setMicrophoneEnabled(enableMic)
-            lkRoom.localParticipant.setCameraEnabled(enableCamera)
+            if (publishAudio) {
+                runCatching { lkRoom.localParticipant.setMicrophoneEnabled(true) }
+            }
+            if (publishCamera) {
+                runCatching { lkRoom.localParticipant.setCameraEnabled(true) }
+            }
+
             _isConnected.value = true
-            observeRoomEvents(lkRoom)
+            _isLiveStreamActive.value = true
+            syncRoomParticipantsAndTracks(lkRoom)
+            true
+        }.onFailure { err ->
+            Log.w("LiveKitCallEngine", "Call connection error", err)
+            _isLiveStreamActive.value = false
+            _isConnected.value = false
+            _connectionStatusLabel.value = "Couldn't connect — please check internet"
         }
     }
 
     private fun observeRoomEvents(lkRoom: Room) {
-        scope.launch {
+        roomEventsJob?.cancel()
+        roomEventsJob = scope.launch {
             lkRoom.events.collect { event ->
                 when (event) {
                     is RoomEvent.DataReceived -> {
@@ -138,33 +202,120 @@ class LiveKitCallEngine(private val context: Context) {
                             _incomingDataPackets.tryEmit(packet)
                         }
                     }
-                    is RoomEvent.Disconnected -> {
-                        _isConnected.value = false
+                    is RoomEvent.ParticipantConnected,
+                    is RoomEvent.ParticipantDisconnected,
+                    is RoomEvent.TrackSubscribed,
+                    is RoomEvent.TrackUnsubscribed,
+                    is RoomEvent.TrackPublished,
+                    is RoomEvent.TrackUnpublished,
+                    is RoomEvent.TrackMuted,
+                    is RoomEvent.TrackUnmuted -> {
+                        syncRoomParticipantsAndTracks(lkRoom)
+                    }
+                    is RoomEvent.ActiveSpeakersChanged -> {
+                        val speakers = event.speakers.mapNotNull { parseMemberId(it.identity?.value) }.toSet()
+                        _speakingMembers.value = speakers
+                    }
+                    is RoomEvent.Reconnecting -> {
+                        _connectionStatusLabel.value = "Reconnecting call…"
                     }
                     is RoomEvent.Reconnected -> {
                         _isConnected.value = true
+                        _isLiveStreamActive.value = true
+                        syncRoomParticipantsAndTracks(lkRoom)
                     }
-                    else -> Unit
+                    is RoomEvent.Disconnected -> {
+                        _isConnected.value = false
+                        _isLiveStreamActive.value = false
+                        _videoTracksByMember.value = emptyMap()
+                        _connectedLiveMembers.value = emptySet()
+                        _speakingMembers.value = emptySet()
+                        _connectionStatusLabel.value = "Call disconnected"
+                    }
+                    else -> {
+                        syncRoomParticipantsAndTracks(lkRoom)
+                    }
                 }
             }
         }
     }
 
+    private fun syncRoomParticipantsAndTracks(lkRoom: Room) {
+        val trackMap = mutableMapOf<FamilyMemberId, VideoTrack>()
+        val liveSet = mutableSetOf<FamilyMemberId>()
+
+        val selfId = parseMemberId(lkRoom.localParticipant.identity?.value) ?: localMember
+        liveSet.add(selfId)
+        val localPub = lkRoom.localParticipant.getTrackPublication(Track.Source.CAMERA)
+        val localTrack = localPub?.track as? VideoTrack
+        if (localTrack != null && localPub.muted != true) {
+            trackMap[selfId] = localTrack
+        }
+
+        lkRoom.remoteParticipants.values.forEach { remote ->
+            val memberId = parseMemberId(remote.identity?.value) ?: return@forEach
+            liveSet.add(memberId)
+            val remotePub = remote.getTrackPublication(Track.Source.CAMERA)
+            val remoteTrack = remotePub?.track as? VideoTrack
+            if (remoteTrack != null && remotePub.muted != true) {
+                trackMap[memberId] = remoteTrack
+            }
+        }
+
+        _connectedLiveMembers.value = liveSet
+        _videoTracksByMember.value = trackMap
+        if (_isLiveStreamActive.value) {
+            val count = liveSet.size
+            _connectionStatusLabel.value = if (count >= 2) {
+                "$count family members in the call"
+            } else {
+                "Connected • Waiting for family to join…"
+            }
+        }
+    }
+
+    private fun parseMemberId(identity: String?): FamilyMemberId? {
+        if (identity.isNullOrBlank()) return null
+        return FamilyMemberId.entries.firstOrNull {
+            identity.equals(it.name, ignoreCase = true) ||
+                identity.startsWith(it.name, ignoreCase = true)
+        }
+    }
+
     suspend fun setMicrophoneEnabled(enabled: Boolean) {
-        runCatching { room?.localParticipant?.setMicrophoneEnabled(enabled) }
+        if (enabled) {
+            val hasPerm = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasPerm) return
+        }
+        runCatching {
+            room?.localParticipant?.setMicrophoneEnabled(enabled)
+            room?.let { syncRoomParticipantsAndTracks(it) }
+        }
     }
 
     suspend fun setCameraEnabled(enabled: Boolean) {
-        runCatching { room?.localParticipant?.setCameraEnabled(enabled) }
+        if (enabled) {
+            val hasPerm = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasPerm) return
+        }
+        runCatching {
+            room?.localParticipant?.setCameraEnabled(enabled)
+            room?.let { syncRoomParticipantsAndTracks(it) }
+        }
     }
 
-    suspend fun switchCamera(isFront: Boolean) {
+    suspend fun switchCamera() {
         runCatching {
-            val lp: LocalParticipant = room?.localParticipant ?: return
-            lp.setCameraEnabled(true)
-            val position = if (isFront) CameraPosition.FRONT else CameraPosition.BACK
-            // LiveKit VideoTrack switch handled via track options when published
-            position.name
+            val lkRoom = room ?: return
+            val cameraPub = lkRoom.localParticipant.getTrackPublication(Track.Source.CAMERA)
+            val localTrack = cameraPub?.track as? LocalVideoTrack
+            localTrack?.switchCamera()
         }
     }
 
@@ -250,6 +401,8 @@ class LiveKitCallEngine(private val context: Context) {
     }
 
     fun disconnect() {
+        roomEventsJob?.cancel()
+        roomEventsJob = null
         runCatching {
             room?.disconnect()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -258,5 +411,13 @@ class LiveKitCallEngine(private val context: Context) {
             audioManager.mode = AudioManager.MODE_NORMAL
         }
         _isConnected.value = false
+        _isLiveStreamActive.value = false
+        _videoTracksByMember.value = emptyMap()
+        _connectedLiveMembers.value = emptySet()
+        _speakingMembers.value = emptySet()
+    }
+
+    companion object {
+        const val DEFAULT_FAMILY_ROOM = "holymoly-family-room"
     }
 }

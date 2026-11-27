@@ -22,10 +22,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -36,6 +37,7 @@ import com.example.data.model.CallPhase
 import com.example.data.model.FamilyMemberId
 import com.example.data.model.MessageType
 import com.example.data.model.VoiceLanguage
+import com.example.security.configureAppCheck
 import com.example.telecom.FamilyTelecomManager
 import com.example.ui.KinNestRoute
 import com.example.ui.KinNestViewModel
@@ -45,18 +47,13 @@ import com.example.ui.components.KinNestNavigationRail
 import com.example.ui.components.KinNestToyBottomDock
 import com.example.ui.components.OfflineAndQuietStatusBanners
 import com.example.ui.screens.ActiveVideoCallScreen
-import com.example.ui.screens.AdventureMissionScreen
 import com.example.ui.screens.AvatarLoginScreen
 import com.example.ui.screens.CallLauncherScreen
 import com.example.ui.screens.ChatBubbleScreen
 import com.example.ui.screens.HomeTreehouseScreen
 import com.example.ui.screens.IncomingCallOverlayScreen
-import com.example.ui.screens.LiveDrawingBoardScreen
 import com.example.ui.screens.ParentalSettingsScreen
-import com.example.ui.screens.PermissionsRecoveryScreen
 import com.example.ui.screens.PlayChestScreen
-import com.example.ui.screens.StoryTogetherScreen
-import com.example.ui.screens.UsConstellationScreen
 import com.example.ui.theme.KinNestAccessibilityConfig
 import com.example.ui.theme.KinNestTheme
 
@@ -68,6 +65,8 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // STEP 1: Configure Firebase App Check with launch intent before UI, ViewModels, or Firebase calls
+        configureAppCheck(this, intent)
         enableEdgeToEdge()
         captureIntentExtras(intent)
 
@@ -111,14 +110,23 @@ private fun KinNestAppRoot(
     val callState by viewModel.callState.collectAsStateWithLifecycle()
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
     val allMessages by viewModel.allMessages.collectAsStateWithLifecycle()
-    val capsules by viewModel.memoryCapsules.collectAsStateWithLifecycle()
-    val syncQueue by viewModel.syncQueue.collectAsStateWithLifecycle()
     val allActivities by viewModel.allActivities.collectAsStateWithLifecycle()
     val syncState by viewModel.offlineSyncState.collectAsStateWithLifecycle()
     val strokes by viewModel.drawingStrokes.collectAsStateWithLifecycle()
-    val heartbeatBanner by viewModel.heartbeatBanner.collectAsStateWithLifecycle()
     val isWalkieRecording by viewModel.isWalkieRecording.collectAsStateWithLifecycle()
-    val storyPageIndex by viewModel.storyPageIndex.collectAsStateWithLifecycle()
+    val memberPresence by viewModel.memberPresence.collectAsStateWithLifecycle()
+    val xoxoState by viewModel.xoxoState.collectAsStateWithLifecycle()
+    val liveKitRoom by viewModel.liveKitRoom.collectAsStateWithLifecycle()
+    val isLiveStreamActive by viewModel.isLiveStreamActive.collectAsStateWithLifecycle()
+    val videoTracksByMember by viewModel.videoTracksByMember.collectAsStateWithLifecycle()
+    val connectedLiveMembers by viewModel.connectedLiveMembers.collectAsStateWithLifecycle()
+
+    LifecycleEventEffect(Lifecycle.Event.ON_START) {
+        viewModel.onAppForegrounded()
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        viewModel.onAppBackgrounded()
+    }
 
     val darkTheme = session.darkModeOverride ?: isSystemInDarkTheme()
     val a11yConfig = KinNestAccessibilityConfig(
@@ -193,37 +201,25 @@ private fun KinNestAppRoot(
                 containerColor = androidx.compose.ui.graphics.Color.Transparent,
                 snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
             ) { _ ->
-                NavHost(
-                    navController = navController,
-                    startDestination = if (session.isAuthenticated) {
+                val initialStartDestination: KinNestRoute = remember {
+                    if (session.deviceOwner != null) {
                         KinNestRoute.Workspace(0)
                     } else {
                         KinNestRoute.LoginPortal
                     }
+                }
+                NavHost(
+                    navController = navController,
+                    startDestination = initialStartDestination
                 ) {
                     composable<KinNestRoute.LoginPortal> {
                         AvatarLoginScreen(
                             profiles = profiles,
-                            onAvatarTap = { member ->
-                                if (viewModel.signInWithDeviceBoundAvatar(member)) {
-                                    navController.navigate(KinNestRoute.Workspace(0)) {
-                                        popUpTo<KinNestRoute.LoginPortal> { inclusive = true }
-                                    }
+                            onConfirmDeviceOwner = { member ->
+                                viewModel.assignThisDeviceToMember(member)
+                                navController.navigate(KinNestRoute.Workspace(0)) {
+                                    popUpTo<KinNestRoute.LoginPortal> { inclusive = true }
                                 }
-                            },
-                            onQuickEnterTab = { tab ->
-                                val targetMember = session.activeMember ?: FamilyMemberId.ZAYN
-                                if (viewModel.signInWithDeviceBoundAvatar(targetMember)) {
-                                    navController.navigate(KinNestRoute.Workspace(tab.index)) {
-                                        popUpTo<KinNestRoute.LoginPortal> { inclusive = true }
-                                    }
-                                }
-                            },
-                            onCustomizeProfile = { member, badge, uri ->
-                                viewModel.updateMemberPersonalization(member, badge, uri)
-                            },
-                            onOpenPermissions = {
-                                navController.navigate(KinNestRoute.PermissionsRecovery)
                             }
                         )
                     }
@@ -231,7 +227,7 @@ private fun KinNestAppRoot(
                     composable<KinNestRoute.Workspace> { backStackEntry ->
                         val workspaceArgs = backStackEntry.toRoute<KinNestRoute.Workspace>()
                         var selectedTabOrdinal by rememberSaveable(workspaceArgs.initialTab) {
-                            mutableStateOf(workspaceArgs.initialTab)
+                            mutableStateOf(workspaceArgs.initialTab.coerceIn(0, WorkspaceTab.entries.lastIndex))
                         }
                         val selectedTab = WorkspaceTab.entries.getOrElse(selectedTabOrdinal) {
                             WorkspaceTab.HOME
@@ -270,58 +266,28 @@ private fun KinNestAppRoot(
                                         OfflineAndQuietStatusBanners(
                                             syncState = syncState,
                                             quietHoursActive = session.quietHoursEnabled,
-                                            onRetrySync = { viewModel.triggerSyncNow(expedited = true) },
-                                            onOpenRecovery = {
-                                                navController.navigate(KinNestRoute.PermissionsRecovery)
-                                            }
+                                            onRetrySync = { viewModel.triggerSyncNow(expedited = true) }
                                         )
 
                                         Box(modifier = Modifier.weight(1f).fillMaxSize()) {
                                             when (selectedTab) {
                                                 WorkspaceTab.HOME -> {
-                                                    val moment = allActivities.firstOrNull { it.kind == "MOMENT" }
                                                     HomeTreehouseScreen(
                                                         session = session,
                                                         profiles = profiles,
-                                                        dailyMoment = moment,
-                                                        heartbeatBanner = heartbeatBanner,
+                                                        memberPresence = memberPresence,
                                                         isWalkieRecording = isWalkieRecording,
-                                                        onDismissHeartbeatBanner = viewModel::dismissHeartbeatBanner,
-                                                        onSendHeartbeat = viewModel::sendHeartbeatTrigger,
-                                                        onStartThreeWayCall = {
-                                                            viewModel.startFamilyCall(
-                                                                listOf(
-                                                                    FamilyMemberId.MITHUN,
-                                                                    FamilyMemberId.MAFITHA,
-                                                                    FamilyMemberId.ZAYN
-                                                                )
-                                                            )
+                                                        onCallSpecificMember = { target ->
+                                                            viewModel.startFamilyCall(listOf(target))
+                                                        },
+                                                        onCustomizeMyProfile = { badge, uri ->
+                                                            val self = session.deviceOwner ?: session.activeMember ?: FamilyMemberId.MITHUN
+                                                            viewModel.updateMemberPersonalization(self, badge, uri)
                                                         },
                                                         onWalkiePressStart = viewModel::startWalkieTalkieHold,
                                                         onWalkiePressRelease = viewModel::releaseWalkieTalkieHold,
-                                                        onRotateMoment = viewModel::rotateDailyMoment,
-                                                        onToggleLanguage = {
-                                                            val next = if (session.voiceLanguage == VoiceLanguage.ENGLISH) {
-                                                                VoiceLanguage.MALAYALAM
-                                                            } else {
-                                                                VoiceLanguage.ENGLISH
-                                                            }
-                                                            viewModel.setVoiceLanguage(next)
-                                                        },
-                                                        onSpeakTreehouseTip = {
-                                                            viewModel.speakHelper(
-                                                                english = "Tap the blue rocket for a video call, or hold the big orange button to talk!",
-                                                                malayalam = "വീഡിയോ കോളിനായി നീല റോക്കറ്റ് അമർത്തൂ, സംസാരിക്കാൻ വലിയ ഓറഞ്ച് ബട്ടൺ അമർത്തിപ്പിടിക്കൂ!"
-                                                            )
-                                                        },
-                                                        onReplyHeartbeatWithVideo = {
-                                                            viewModel.startFamilyCall(
-                                                                listOf(
-                                                                    FamilyMemberId.MITHUN,
-                                                                    FamilyMemberId.MAFITHA,
-                                                                    FamilyMemberId.ZAYN
-                                                                )
-                                                            )
+                                                        onOpenSettings = {
+                                                            navController.navigate(KinNestRoute.ParentalSettings)
                                                         }
                                                     )
                                                 }
@@ -331,6 +297,7 @@ private fun KinNestAppRoot(
                                                         session = session,
                                                         callState = callState,
                                                         profiles = profiles,
+                                                        memberPresence = memberPresence,
                                                         onStartThreeWayCall = {
                                                             viewModel.startFamilyCall(
                                                                 listOf(
@@ -343,15 +310,7 @@ private fun KinNestAppRoot(
                                                         onStartOneOnOneCall = { target ->
                                                             viewModel.startFamilyCall(listOf(target))
                                                         },
-                                                        onCycleAudioRoute = viewModel::cycleAudioRoute,
-                                                        onTestIncomingLockCall = {
-                                                            val caller = if (session.activeMember == FamilyMemberId.MAFITHA) {
-                                                                FamilyMemberId.MITHUN
-                                                            } else {
-                                                                FamilyMemberId.MAFITHA
-                                                            }
-                                                            viewModel.simulateIncomingCall(caller, isThreeWay = true)
-                                                        }
+                                                        onCycleAudioRoute = viewModel::cycleAudioRoute
                                                     )
                                                 }
 
@@ -384,58 +343,16 @@ private fun KinNestAppRoot(
 
                                                 WorkspaceTab.PLAY -> {
                                                     PlayChestScreen(
-                                                        activities = allActivities,
-                                                        onOpenLiveDrawing = {
-                                                            navController.navigate(KinNestRoute.LiveDrawingBoard)
-                                                        },
-                                                        onOpenStoryTogether = {
-                                                            navController.navigate(KinNestRoute.StoryTogether)
-                                                        },
-                                                        onOpenAdventureMission = {
-                                                            navController.navigate(KinNestRoute.AdventureMission)
-                                                        },
-                                                        onToggleActivityDone = viewModel::toggleActivityCompleted,
-                                                        onStartPartyGameCall = {
-                                                            viewModel.startFamilyCall(
-                                                                listOf(
-                                                                    FamilyMemberId.MITHUN,
-                                                                    FamilyMemberId.MAFITHA,
-                                                                    FamilyMemberId.ZAYN
-                                                                )
-                                                            )
-                                                        }
-                                                    )
-                                                }
-
-                                                WorkspaceTab.US -> {
-                                                    UsConstellationScreen(
-                                                        capsules = capsules,
-                                                        activities = allActivities,
-                                                        onAddCapsule = viewModel::addMemoryCapsule,
-                                                        onToggleVaultPin = viewModel::toggleCapsuleOfflinePin,
-                                                        onVoteTravelPin = viewModel::voteActivity,
-                                                        onAddTravelPin = { title, sub, cost, whenLabel ->
-                                                            viewModel.addFamilyActivity(
-                                                                kind = "TRAVEL_PIN",
-                                                                title = title,
-                                                                subtitle = sub,
-                                                                tag = "TRIP",
-                                                                costOrDuration = cost,
-                                                                dateLabel = whenLabel
-                                                            )
-                                                        },
-                                                        onOpenParentalSettings = {
-                                                            navController.navigate(KinNestRoute.ParentalSettings)
-                                                        },
-                                                        onOpenPermissionsRecovery = {
-                                                            navController.navigate(KinNestRoute.PermissionsRecovery)
-                                                        },
-                                                        onSignOut = {
-                                                            viewModel.signOut()
-                                                            navController.navigate(KinNestRoute.LoginPortal) {
-                                                                popUpTo(0) { inclusive = true }
-                                                            }
-                                                        }
+                                                        xoxoState = xoxoState,
+                                                        selfMember = session.deviceOwner ?: session.activeMember ?: FamilyMemberId.MITHUN,
+                                                        profiles = profiles,
+                                                        memberPresence = memberPresence,
+                                                        onSelectPlayers = viewModel::selectXoxoPlayers,
+                                                        onSwapSides = viewModel::swapXoxoSides,
+                                                        onChangePlayMode = viewModel::setXoxoPlayMode,
+                                                        onMakeMove = viewModel::makeXoxoMove,
+                                                        onNextRound = viewModel::startNextXoxoRound,
+                                                        onResetScores = viewModel::resetXoxoMatchScores
                                                     )
                                                 }
                                             }
@@ -450,6 +367,10 @@ private fun KinNestAppRoot(
                         ActiveVideoCallScreen(
                             selfMember = session.activeMember ?: FamilyMemberId.MITHUN,
                             callState = callState,
+                            liveKitRoom = liveKitRoom,
+                            isLiveStreamActive = isLiveStreamActive,
+                            videoTracksByMember = videoTracksByMember,
+                            connectedLiveMembers = connectedLiveMembers,
                             liveStrokes = strokes,
                             onToggleMic = viewModel::toggleMicMute,
                             onToggleCamera = viewModel::toggleCameraEnabled,
@@ -461,7 +382,6 @@ private fun KinNestAppRoot(
                             onTriggerScreenTap = viewModel::triggerScreenTapRipple,
                             onToggleDrawingOverlay = viewModel::toggleInCallDrawingOverlay,
                             onCommitDrawingStroke = viewModel::addDrawingStroke,
-                            onSimulateHandoff = viewModel::simulateNetworkHandoff,
                             onMediaPermissionsChanged = viewModel::onCallMediaPermissionsUpdated,
                             onEndCall = viewModel::endActiveCall
                         )
@@ -478,56 +398,6 @@ private fun KinNestAppRoot(
                         )
                     }
 
-                    composable<KinNestRoute.LiveDrawingBoard> {
-                        LiveDrawingBoardScreen(
-                            strokes = strokes,
-                            onAddStroke = viewModel::addDrawingStroke,
-                            onClearBoard = viewModel::clearDrawingBoard,
-                            onSaveToCapsules = {
-                                viewModel.addMemoryCapsule(
-                                    title = "Family Drawing Masterpiece 🎨",
-                                    caption = "Saved ${strokes.size} live collaborative strokes!",
-                                    unlockDaysFromNow = null
-                                )
-                                navController.popBackStack()
-                            },
-                            onBack = { navController.popBackStack() }
-                        )
-                    }
-
-                    composable<KinNestRoute.StoryTogether> {
-                        StoryTogetherScreen(
-                            pageIndex = storyPageIndex,
-                            voiceLanguage = session.voiceLanguage,
-                            onChangePage = viewModel::setStoryPage,
-                            onNarratePage = { en, ml -> viewModel.speakHelper(en, ml) },
-                            onBack = { navController.popBackStack() }
-                        )
-                    }
-
-                    composable<KinNestRoute.AdventureMission> {
-                        AdventureMissionScreen(
-                            onMissionFound = {
-                                viewModel.addMemoryCapsule(
-                                    title = "AR Mission Victory! 🧭",
-                                    caption = "Zayn Adam solved all indoor AR clues!",
-                                    unlockDaysFromNow = null
-                                )
-                            },
-                            onBack = { navController.popBackStack() }
-                        )
-                    }
-
-                    composable<KinNestRoute.PermissionsRecovery> {
-                        PermissionsRecoveryScreen(
-                            syncState = syncState,
-                            syncQueue = syncQueue,
-                            onRetrySync = { viewModel.triggerSyncNow(expedited = true) },
-                            onToggleOfflineSim = viewModel::toggleSimulatedOfflineMode,
-                            onBack = { navController.popBackStack() }
-                        )
-                    }
-
                     composable<KinNestRoute.ParentalSettings> {
                         ParentalSettingsScreen(
                             session = session,
@@ -539,7 +409,7 @@ private fun KinNestAppRoot(
                             onToggleQuietHours = viewModel::toggleQuietHours,
                             onToggleReducedMotion = viewModel::toggleReducedMotion,
                             onToggleDarkMode = viewModel::setDarkModeOverride,
-                            onToggleDeviceTrust = viewModel::toggleDeviceTrustSimulation,
+                            onReassignDeviceOwner = viewModel::reassignDeviceOwner,
                             onAddParentLog = { title, note, cost ->
                                 viewModel.addFamilyActivity(
                                     kind = "PARENT_LOG",

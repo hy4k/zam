@@ -75,3 +75,16 @@ data class FamilyActivityEntity(
     val isCompleted: Boolean,
     val timestampMs: Long
 )
+
+@Entity(tableName = "daily_comic_photos")
+data class DailyComicPhotoEntity(
+    @PrimaryKey val dateKey: String, // yyyy-MM-dd (1 shared family photo per day)
+    val id: String,
+    val authorId: String,
+    val caption: String,
+    val comicStyle: String,
+    val localImagePath: String,
+    val reactionEmoji: String?,
+    val createdAtMs: Long
+)
+

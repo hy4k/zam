@@ -2,7 +2,6 @@ package com.example.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -38,9 +37,7 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Save
-import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -72,10 +69,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.example.data.local.FamilyActivityEntity
-import com.example.data.local.OfflineSyncQueueEntity
 import com.example.data.local.UserProfileEntity
+import com.example.data.model.FamilyMemberId
 import com.example.data.model.LiveStroke
-import com.example.data.model.OfflineSyncState
 import com.example.data.model.UserSessionState
 import com.example.data.model.VoiceLanguage
 import com.example.security.ParentalAuthManager
@@ -281,8 +277,8 @@ fun StoryTogetherScreen(
             StoryPage(
                 emoji = "🚀",
                 title = "Chapter 1: The Mint Rocket",
-                english = "Zayn Adam, Papa Mithun, and Mama Mafitha hopped inside a glowing mint rocket bound for Starlight Island.",
-                malayalam = "സെയ്ൻ ആദവും പപ്പ മിഥുനും മമ്മ മഫിതയും തിളങ്ങുന്ന റോക്കറ്റിൽ നക്ഷത്രദ്വീപിലേക്ക് പറന്നു."
+                english = "Zayn Adam, Vapi Mithun, and Ummi Mafitha hopped inside a glowing mint rocket bound for Starlight Island.",
+                malayalam = "സെയ്ൻ ആദവും വാപ്പി മിഥുനും ഉമ്മി മഫിതയും തിളങ്ങുന്ന റോക്കറ്റിൽ നക്ഷത്രദ്വീപിലേക്ക് പറന്നു."
             ),
             StoryPage(
                 emoji = "🦕",
@@ -299,7 +295,7 @@ fun StoryTogetherScreen(
             StoryPage(
                 emoji = "🏡",
                 title = "Chapter 4: Home to Our Treehouse",
-                english = "Three golden stars tucked them safely back into the KinNest treehouse. Goodnight!",
+                english = "Three golden stars tucked them safely back into the Holy Moly ! treehouse. Goodnight!",
                 malayalam = "മൂന്ന് സ്വർണ്ണ നക്ഷത്രങ്ങൾ അവരെ തിരികെ ട്രീഹൗസിൽ എത്തിച്ചു. ശുഭരാത്രി!"
             )
         )
@@ -424,7 +420,7 @@ fun AdventureMissionScreen(
     val clues = listOf(
         "Clue 1: Point your Space Scanner at something BLUE & SOFT!",
         "Clue 2: Find a shiny spoon or cup in the kitchen!",
-        "Clue 3: Take a goofy victory selfie with Mama or Papa!"
+        "Clue 3: Take a goofy victory selfie with Ummi or Vapi!"
     )
 
     Column(
@@ -434,7 +430,7 @@ fun AdventureMissionScreen(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        SubScreenTopBar(title = "AR Adventure Mission", onBack = onBack)
+        SubScreenTopBar(title = "Camera Treasure Hunt", onBack = onBack)
 
         Box(
             modifier = Modifier
@@ -463,7 +459,7 @@ fun AdventureMissionScreen(
                         modifier = Modifier.size(56.dp)
                     )
                     Text(
-                        text = "Enable Camera to start Zayn's Indoor AR Clue Scanner!",
+                        text = "Turn on the camera to start Zayn's Treasure Hunt!",
                         style = MaterialTheme.typography.titleLarge,
                         color = Color.White,
                         textAlign = TextAlign.Center
@@ -513,157 +509,7 @@ fun AdventureMissionScreen(
 }
 
 /**
- * Operational / Recovery Screen: Runtime Permissions Setup + Offline Sync Queue & Retry Manager.
- */
-@Composable
-fun PermissionsRecoveryScreen(
-    syncState: OfflineSyncState,
-    syncQueue: List<OfflineSyncQueueEntity>,
-    onRetrySync: () -> Unit,
-    onToggleOfflineSim: (Boolean) -> Unit,
-    onBack: () -> Unit
-) {
-    BackHandler { onBack() }
-
-    val context = LocalContext.current
-    var refreshTick by remember { mutableStateOf(0) }
-
-    val multiPermLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { refreshTick++ }
-
-    val requiredPerms = buildList {
-        add(Manifest.permission.CAMERA to "Camera (3-Way Video & AR Missions)")
-        add(Manifest.permission.RECORD_AUDIO to "Microphone (LiveKit & Walkie-Talkie)")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            add(Manifest.permission.POST_NOTIFICATIONS to "Notifications (Lock-Screen Ring & Heartbeat)")
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            add(Manifest.permission.BLUETOOTH_CONNECT to "Bluetooth Audio Routing (Headsets)")
-        }
-    }
-
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .safeDrawingPadding(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        item { SubScreenTopBar(title = "Permissions & Sync Recovery", onBack = onBack) }
-
-        item {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .claymorphic(
-                        cornerRadius = 26.dp,
-                        surfaceColor = MaterialTheme.colorScheme.surface,
-                        elevation = 8.dp
-                    )
-                    .padding(16.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Hardware & Call Permissions", style = MaterialTheme.typography.titleLarge)
-                    requiredPerms.forEach { (perm, label) ->
-                        val granted = remember(refreshTick) {
-                            ContextCompat.checkSelfPermission(context, perm) ==
-                                PackageManager.PERMISSION_GRANTED
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = if (granted) Icons.Rounded.CheckCircle else Icons.Rounded.Security,
-                                contentDescription = null,
-                                tint = if (granted) EmeraldAccept else WalkieAmber
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.bodyLarge,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text(
-                                text = if (granted) "Ready" else "Needed",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = if (granted) EmeraldAccept else WalkieAmber
-                            )
-                        }
-                    }
-                    ClayActionButton(
-                        text = "Grant Missing Permissions",
-                        containerColor = ElectricRocket,
-                        testTag = "grant_permissions_button",
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            multiPermLauncher.launch(requiredPerms.map { it.first }.toTypedArray())
-                        }
-                    )
-                }
-            }
-        }
-
-        item {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .claymorphic(
-                        cornerRadius = 26.dp,
-                        surfaceColor = MaterialTheme.colorScheme.surface,
-                        elevation = 8.dp
-                    )
-                    .padding(16.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("WorkManager Sync & Retry Manager", style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        text = "Supabase: ${if (syncState.supabaseConfigured) "Connected" else "Local Room Vault (Add keys in Secrets)"}\n" +
-                            "LiveKit SFU: ${if (syncState.liveKitConfigured) "Connected" else "Local Preview Mode (Add URL in Secrets)"}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Simulate Offline Mode",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Switch(
-                            checked = !syncState.isOnline,
-                            onCheckedChange = onToggleOfflineSim
-                        )
-                    }
-                    ClayActionButton(
-                        text = "Retry All Queued Uploads (${syncQueue.size})",
-                        containerColor = MintTreehouseDeep,
-                        icon = Icons.Rounded.Refresh,
-                        testTag = "retry_all_sync_button",
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = onRetrySync
-                    )
-                }
-            }
-        }
-
-        items(syncQueue, key = { it.id }) { q ->
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .claymorphic(cornerRadius = 20.dp, surfaceColor = MaterialTheme.colorScheme.surface)
-                    .padding(14.dp)
-            ) {
-                Column {
-                    Text("${q.entityType} • ${q.status} (Retries: ${q.retryCount})", style = MaterialTheme.typography.titleMedium)
-                    q.lastError?.let {
-                        Text(it, style = MaterialTheme.typography.bodyMedium, color = CrimsonDecline)
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * PIN / Biometric-Gated Parental Settings & Mithun + Mafitha's Satirical Household Ledger.
+ * PIN / Biometric-Gated Parent Corner & Mithun + Mafitha's Household Ledger.
  */
 @Composable
 fun ParentalSettingsScreen(
@@ -676,7 +522,7 @@ fun ParentalSettingsScreen(
     onToggleQuietHours: (Boolean) -> Unit,
     onToggleReducedMotion: (Boolean) -> Unit,
     onToggleDarkMode: (Boolean?) -> Unit,
-    onToggleDeviceTrust: (String, Boolean) -> Unit,
+    onReassignDeviceOwner: (FamilyMemberId) -> Unit,
     onAddParentLog: (title: String, note: String, cost: String) -> Unit,
     onLockAndBack: () -> Unit
 ) {
@@ -776,7 +622,7 @@ fun ParentalSettingsScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SubScreenTopBar(title = "Parent Controls & Satirical Ledger", onBack = onLockAndBack) }
+        item { SubScreenTopBar(title = "Vapi & Ummi's Corner", onBack = onLockAndBack) }
 
         // Comfort & Accessibility Controls
         item {
@@ -831,29 +677,36 @@ fun ParentalSettingsScreen(
             }
         }
 
-        // Hardware Keystore Device Authorization
+        // Equipment-Assigned Phone Owner (Safe reassignment only inside PIN-protected Parent Corner)
         item {
+            val currentOwner = session.deviceOwner ?: session.activeMember ?: FamilyMemberId.MITHUN
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .claymorphic(cornerRadius = 26.dp, surfaceColor = MaterialTheme.colorScheme.surface)
                     .padding(16.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Hardware Keystore Device Trust", style = MaterialTheme.typography.titleLarge)
-                    profiles.forEach { prof ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(prof.displayName, style = MaterialTheme.typography.titleMedium)
-                                Text(
-                                    text = "Key: ${prof.devicePublicFingerprint}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Switch(
-                                checked = prof.isDeviceTrusted,
-                                onCheckedChange = { onToggleDeviceTrust(prof.memberId, it) }
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Phone Owner Assignment", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        text = "This phone always stays signed in as ${currentOwner.displayName} (${currentOwner.title}). Tap below only if you are handing this phone to another family member.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FamilyMemberId.entries.forEach { member ->
+                            val isAssigned = member == currentOwner
+                            ClayActionButton(
+                                text = member.title,
+                                containerColor = if (isAssigned) EmeraldAccept else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (isAssigned) Color.White else MaterialTheme.colorScheme.onSurface,
+                                testTag = "reassign_device_${member.name.lowercase()}",
+                                modifier = Modifier.weight(1f),
+                                minHeight = 48.dp,
+                                onClick = { onReassignDeviceOwner(member) }
                             )
                         }
                     }

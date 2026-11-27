@@ -1,6 +1,6 @@
 {
-  "name": "KinNest",
-  "description": "Private 3-person family video, voice, and shared moments hub exclusively for Mithun (Papa), Mafitha (Mama), and Zayn Adam.",
+  "name": "Holy Moly !",
+  "description": "Private 3-person family video, voice, and shared moments hub exclusively for Mithun (Vapi), Mafitha (Ummi), and Zayn Adam.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

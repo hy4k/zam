@@ -6,9 +6,15 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.Uri
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ai.ComicPhotoStyle
+import com.example.ai.DailyComicGenerationState
+import com.example.ai.DailyComicStylizerRepository
+import com.example.ai.DailyTurnSchedule
+import com.example.data.local.DailyComicPhotoEntity
 import com.example.data.local.EncryptedMessageEntity
 import com.example.data.local.FamilyActivityEntity
 import com.example.data.local.KinNestDatabase
@@ -26,21 +32,27 @@ import com.example.data.model.DeliveryStatus
 import com.example.data.model.EmojiBurstEvent
 import com.example.data.model.FamilyMemberId
 import com.example.data.model.LiveStroke
+import com.example.data.model.MemberPresenceStatus
 import com.example.data.model.MessageType
 import com.example.data.model.MomentCategory
 import com.example.data.model.OfflineSyncState
 import com.example.data.model.UserSessionState
 import com.example.data.model.VoiceLanguage
+import com.example.data.model.XoxoGameState
+import com.example.data.model.XoxoMark
+import com.example.data.model.XoxoPlayMode
 import com.example.media.LiveKitCallEngine
 import com.example.media.LiveKitDataPacket
 import com.example.media.StopRecordingResult
 import com.example.media.VoiceAndMediaCapture
 import com.example.security.DeviceKeystoreManager
 import com.example.security.ParentalAuthManager
+import com.example.sync.FamilyRealtimeSignal
 import com.example.sync.KinNestSyncRepository
 import com.example.sync.OfflineSyncWorker
 import com.example.sync.SupabaseCapsuleDto
 import com.example.sync.SupabaseMessageDto
+import com.example.sync.SupabaseRealtimeSignaling
 import com.example.telecom.CallForegroundService
 import com.example.telecom.FamilyTelecomManager
 import kotlinx.coroutines.Dispatchers
@@ -74,20 +86,40 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     private val dao = db.kinNestDao()
     private val keystore = DeviceKeystoreManager(appContext)
     private val syncRepo = KinNestSyncRepository(dao)
+    val realtimeSignaling = SupabaseRealtimeSignaling()
     val liveKitEngine = LiveKitCallEngine(appContext)
     val telecomManager = FamilyTelecomManager(appContext)
     val voiceCapture = VoiceAndMediaCapture(appContext)
+    private val dailyComicRepo = DailyComicStylizerRepository(appContext)
     private val json = Json { ignoreUnknownKeys = true }
 
-    private val _session = MutableStateFlow(UserSessionState())
+    val liveKitRoom = liveKitEngine.activeRoom
+    val isLiveStreamActive = liveKitEngine.isLiveStreamActive
+    val videoTracksByMember = liveKitEngine.videoTracksByMember
+    val connectedLiveMembers = liveKitEngine.connectedLiveMembers
+
+    private val devicePrefs = appContext.getSharedPreferences(PREFS_DEVICE_BINDING, Context.MODE_PRIVATE)
+    private val initialDeviceOwner: FamilyMemberId? = devicePrefs
+        .getString(KEY_ASSIGNED_MEMBER, null)
+        ?.let { stored -> runCatching { FamilyMemberId.valueOf(stored) }.getOrNull() }
+
+    private val _session = MutableStateFlow(
+        UserSessionState(
+            deviceOwner = initialDeviceOwner,
+            activeMember = initialDeviceOwner,
+            isAuthenticated = initialDeviceOwner != null,
+            isDeviceTrusted = true
+        )
+    )
     val session: StateFlow<UserSessionState> = _session.asStateFlow()
 
     private val _callState = MutableStateFlow(
         CallState(
+            roomName = LiveKitCallEngine.DEFAULT_FAMILY_ROOM,
             recentCallLogs = listOf(
                 CallLogEntry("c1", "Mithun, Mafitha & Zayn", "3-Way Video", false, "Today • 8:05 AM", "14m 22s"),
-                CallLogEntry("c2", "Mafitha (Mama)", "1-on-1 Video", false, "Yesterday • 6:40 PM", "06m 10s"),
-                CallLogEntry("c3", "Mithun (Papa)", "Missed Call", true, "Yesterday • 1:15 PM", "Tap to call back")
+                CallLogEntry("c2", "Mafitha (Ummi)", "1-on-1 Video", false, "Yesterday • 6:40 PM", "06m 10s"),
+                CallLogEntry("c3", "Mithun (Vapi)", "Missed Call", true, "Yesterday • 1:15 PM", "Tap to call back")
             )
         )
     )
@@ -95,7 +127,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
 
     private val _isOnline = MutableStateFlow(checkCurrentConnectivity())
     private val _isSyncingNow = MutableStateFlow(false)
-    private val _lastSyncedLabel = MutableStateFlow("Local Vault Ready")
+    private val _lastSyncedLabel = MutableStateFlow("Up to date")
 
     val profiles: StateFlow<List<UserProfileEntity>> = dao.observeProfiles()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -110,6 +142,9 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val allActivities: StateFlow<List<FamilyActivityEntity>> = dao.observeAllActivities()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val dailyComicPhotos: StateFlow<List<DailyComicPhotoEntity>> = dao.observeDailyComicPhotos()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val offlineSyncState: StateFlow<OfflineSyncState> = combine(
@@ -141,10 +176,29 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     private val _storyPageIndex = MutableStateFlow(0)
     val storyPageIndex: StateFlow<Int> = _storyPageIndex.asStateFlow()
 
+    private val _dailyComicGenState = MutableStateFlow<DailyComicGenerationState>(DailyComicGenerationState.Idle)
+    val dailyComicGenState: StateFlow<DailyComicGenerationState> = _dailyComicGenState.asStateFlow()
+
+    private val _memberPresence = MutableStateFlow(
+        FamilyMemberId.entries.associateWith { member ->
+            MemberPresenceStatus(
+                memberId = member,
+                isOnline = member == initialDeviceOwner && _isOnline.value,
+                lastSeenMs = if (member == initialDeviceOwner) System.currentTimeMillis() else null
+            )
+        }
+    )
+    val memberPresence: StateFlow<Map<FamilyMemberId, MemberPresenceStatus>> = _memberPresence.asStateFlow()
+
+    private val _xoxoState = MutableStateFlow(defaultXoxoStateFor(initialDeviceOwner))
+    val xoxoState: StateFlow<XoxoGameState> = _xoxoState.asStateFlow()
+
     private val _uiFeedback = MutableSharedFlow<String>(extraBufferCapacity = 16)
     val uiFeedback = _uiFeedback.asSharedFlow()
 
+    private var isAppInForeground = true
     private var callTimerJob: Job? = null
+    private var presenceLoopJob: Job? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     init {
@@ -156,6 +210,12 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         }
         registerConnectivityMonitor()
         observeLiveKitDataChannel()
+        observeLiveKitRoomState()
+        observeRealtimeSignaling()
+        if (_isOnline.value) {
+            realtimeSignaling.connectIfConfigured()
+        }
+        startPresenceLoop()
     }
 
     private fun checkCurrentConnectivity(): Boolean {
@@ -170,11 +230,20 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 _isOnline.value = true
+                updateSelfPresence(online = isAppInForeground)
+                if (isAppInForeground) {
+                    realtimeSignaling.connectIfConfigured()
+                    _session.value.deviceOwner?.let { owner ->
+                        realtimeSignaling.broadcastPresencePing(owner, isHello = true)
+                    }
+                }
                 triggerSyncNow(expedited = false)
             }
 
             override fun onLost(network: Network) {
                 _isOnline.value = false
+                updateSelfPresence(online = false)
+                realtimeSignaling.disconnect()
             }
         }
         networkCallback = cb
@@ -230,58 +299,330 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    // --- Authentication & Device-Bound Hardware Keystore ---
-
-    fun signInWithDeviceBoundAvatar(member: FamilyMemberId): Boolean {
-        val profile = profiles.value.firstOrNull { it.memberId == member.name }
-        val alias = profile?.deviceKeyAlias ?: "kinnest_device_${member.name.lowercase()}"
-        val expectedFp = profile?.devicePublicFingerprint ?: keystore.ensureDeviceIdentityKey(alias)
-        val trusted = profile?.isDeviceTrusted ?: true
-        val verified = trusted && keystore.verifyDeviceBinding(alias, expectedFp)
-
-        if (!verified) {
-            _uiFeedback.tryEmit("Untrusted device: Hardware Keystore verification blocked sign-in.")
-            return false
+    private fun observeLiveKitRoomState() {
+        viewModelScope.launch {
+            liveKitEngine.connectionStatusLabel.collect { statusLabel ->
+                _callState.update { it.copy(networkQualityLabel = statusLabel) }
+            }
         }
+        viewModelScope.launch {
+            combine(
+                liveKitEngine.connectedLiveMembers,
+                liveKitEngine.speakingMembers,
+                liveKitEngine.videoTracksByMember,
+                liveKitEngine.isLiveStreamActive
+            ) { connected, speaking, tracks, liveActive ->
+                Triple(connected, speaking, Pair(tracks, liveActive))
+            }.collect { (connected, speaking, pair) ->
+                val (tracks, liveActive) = pair
+                if (!liveActive) return@collect
+                _callState.update { state ->
+                    if (state.phase !is CallPhase.Active && state.phase !is CallPhase.DialingOutgoing) {
+                        return@update state
+                    }
+                    val existingMap = state.participants.associateBy { it.memberId }.toMutableMap()
+                    connected.forEach { memberId ->
+                        val prev = existingMap[memberId]
+                        val isSpk = memberId in speaking
+                        val hasCam = tracks.containsKey(memberId)
+                        existingMap[memberId] = (prev ?: CallParticipantState(
+                            memberId = memberId,
+                            isConnected = true,
+                            isSpeaking = isSpk
+                        )).copy(
+                            isConnected = true,
+                            isSpeaking = isSpk,
+                            audioLevel = if (isSpk) 0.85f else 0.14f,
+                            isCameraEnabled = if (memberId == _session.value.activeMember) {
+                                state.isLocalCameraOn
+                            } else {
+                                hasCam
+                            }
+                        )
+                    }
+                    // Keep invited members visible while waiting for them to join
+                    val ordered = existingMap.values.sortedBy { p ->
+                        if (p.memberId == _session.value.activeMember) 0
+                        else if (p.memberId in connected) 1
+                        else 2
+                    }
+                    state.copy(participants = ordered)
+                }
+            }
+        }
+    }
 
+    private fun observeRealtimeSignaling() {
+        viewModelScope.launch {
+            realtimeSignaling.incomingSignals.collect { signal ->
+                val self = _session.value.activeMember
+                val sender = runCatching { FamilyMemberId.valueOf(signal.senderId) }.getOrNull()
+                    ?: return@collect
+                if (self != null && sender == self) return@collect
+
+                val nowMs = System.currentTimeMillis()
+                // Any live signal from another family member proves they are online right now
+                if (signal.kind != SupabaseRealtimeSignaling.KIND_PRESENCE_OFFLINE) {
+                    markRemoteMemberOnline(sender, nowMs)
+                }
+
+                when (signal.kind) {
+                    SupabaseRealtimeSignaling.KIND_PRESENCE_PING -> {
+                        if (signal.text == "HELLO" && self != null && isAppInForeground && _isOnline.value) {
+                            realtimeSignaling.broadcastPresencePing(self, isHello = false)
+                        }
+                    }
+                    SupabaseRealtimeSignaling.KIND_PRESENCE_OFFLINE -> {
+                        markRemoteMemberOffline(sender, signal.timestampMs.takeIf { it > 0L } ?: nowMs)
+                    }
+                    SupabaseRealtimeSignaling.KIND_CALL_INVITE -> {
+                        val targets = signal.targetIdsCsv.split(",").map { it.trim() }
+                        val isForMe = self == null || targets.contains(self.name)
+                        if (isForMe && _callState.value.phase is CallPhase.Idle) {
+                            telecomManager.postLockScreenIncomingCallNotification(
+                                caller = sender,
+                                isThreeWay = signal.isThreeWay,
+                                quietHoursActive = _session.value.quietHoursEnabled
+                            )
+                            _callState.update {
+                                it.copy(
+                                    roomName = signal.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM },
+                                    phase = CallPhase.RingingIncoming(
+                                        caller = sender,
+                                        isThreeWay = signal.isThreeWay,
+                                        roomName = signal.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM }
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    SupabaseRealtimeSignaling.KIND_HEARTBEAT -> {
+                        _heartbeatBanner.value = HeartbeatBannerAlert(
+                            sender = sender,
+                            message = signal.text.ifBlank { "Thinking of you!" },
+                            isSafetyAlert = signal.isSafetyAlert,
+                            timestampMs = signal.timestampMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+                        )
+                        speakHelper(
+                            english = "${sender.displayName} sent a heartbeat: ${signal.text}",
+                            malayalam = "${sender.displayName} സന്ദേശം അയച്ചു: ${signal.text}"
+                        )
+                    }
+                    SupabaseRealtimeSignaling.KIND_CHAT_MESSAGE -> {
+                        if (signal.messageId.isBlank() || signal.text.isBlank()) return@collect
+                        viewModelScope.launch(Dispatchers.IO) {
+                            val encrypted = keystore.encryptMessageForLocalVault(signal.text)
+                            dao.upsertMessage(
+                                EncryptedMessageEntity(
+                                    id = signal.messageId,
+                                    threadId = signal.threadId.ifBlank { "family_group" },
+                                    senderId = sender.name,
+                                    recipientIdsCsv = signal.targetIdsCsv.ifBlank { "MITHUN,MAFITHA,ZAYN" },
+                                    ciphertextPayload = encrypted.first,
+                                    ivBase64 = encrypted.second,
+                                    decryptedPreview = signal.text,
+                                    messageType = signal.messageType.ifBlank { MessageType.TEXT.name },
+                                    mediaLocalPath = null,
+                                    mediaRemoteUrl = null,
+                                    reactionEmoji = null,
+                                    deliveryStatus = DeliveryStatus.DELIVERED.name,
+                                    readByCsv = sender.name,
+                                    timestampMs = signal.timestampMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+                                )
+                            )
+                        }
+                    }
+                    SupabaseRealtimeSignaling.KIND_DAILY_COMIC -> {
+                        if (signal.dateKey.isBlank() || signal.imageBase64.isBlank()) return@collect
+                        viewModelScope.launch(Dispatchers.IO) {
+                            val savedPath = dailyComicRepo.saveReceivedBase64Comic(
+                                dateKey = signal.dateKey,
+                                base64Data = signal.imageBase64
+                            ) ?: return@launch
+                            dao.upsertDailyComicPhoto(
+                                DailyComicPhotoEntity(
+                                    dateKey = signal.dateKey,
+                                    id = signal.messageId.ifBlank { "comic_${UUID.randomUUID()}" },
+                                    authorId = sender.name,
+                                    caption = signal.text,
+                                    comicStyle = signal.comicStyle.ifBlank { ComicPhotoStyle.SUNNY_COMIC.id },
+                                    localImagePath = savedPath,
+                                    reactionEmoji = null,
+                                    createdAtMs = signal.timestampMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+                                )
+                            )
+                            _uiFeedback.tryEmit("${sender.displayName} posted today's family comic photo!")
+                        }
+                    }
+                    SupabaseRealtimeSignaling.KIND_XOXO_STATE -> {
+                        if (signal.text.isBlank()) return@collect
+                        val incoming = runCatching {
+                            json.decodeFromString<XoxoGameState>(signal.text)
+                        }.getOrNull() ?: return@collect
+                        val current = _xoxoState.value
+                        if (incoming.lastUpdatedMs >= current.lastUpdatedMs) {
+                            _xoxoState.value = incoming.copy(playMode = XoxoPlayMode.LIVE_TWO_PHONES)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun startPresenceLoop() {
+        presenceLoopJob?.cancel()
+        presenceLoopJob = viewModelScope.launch {
+            var firstPing = true
+            while (true) {
+                val owner = _session.value.deviceOwner
+                val now = System.currentTimeMillis()
+                if (owner != null && isAppInForeground && _isOnline.value) {
+                    updateSelfPresence(online = true)
+                    realtimeSignaling.broadcastPresencePing(owner, isHello = firstPing)
+                    firstPing = false
+                }
+                // Expire stale remote online flags after 30 seconds without a ping
+                _memberPresence.update { current ->
+                    current.mapValues { (member, status) ->
+                        if (member == owner) {
+                            status.copy(
+                                isOnline = isAppInForeground && _isOnline.value,
+                                lastSeenMs = if (isAppInForeground && _isOnline.value) now else status.lastSeenMs
+                            )
+                        } else if (status.isOnline && status.lastSeenMs != null && (now - status.lastSeenMs) > PRESENCE_TIMEOUT_MS) {
+                            status.copy(isOnline = false)
+                        } else {
+                            status
+                        }
+                    }
+                }
+                delay(12_000L)
+            }
+        }
+    }
+
+    private fun updateSelfPresence(online: Boolean) {
+        val owner = _session.value.deviceOwner ?: return
+        val now = System.currentTimeMillis()
+        _memberPresence.update { current ->
+            val prev = current[owner] ?: MemberPresenceStatus(owner)
+            current + (owner to prev.copy(
+                isOnline = online,
+                lastSeenMs = if (online) now else (prev.lastSeenMs ?: now)
+            ))
+        }
+    }
+
+    private fun markRemoteMemberOnline(member: FamilyMemberId, timestampMs: Long) {
+        _memberPresence.update { current ->
+            current + (member to MemberPresenceStatus(
+                memberId = member,
+                isOnline = true,
+                lastSeenMs = timestampMs
+            ))
+        }
+    }
+
+    private fun markRemoteMemberOffline(member: FamilyMemberId, timestampMs: Long) {
+        _memberPresence.update { current ->
+            current + (member to MemberPresenceStatus(
+                memberId = member,
+                isOnline = false,
+                lastSeenMs = timestampMs
+            ))
+        }
+    }
+
+    fun onAppForegrounded() {
+        isAppInForeground = true
+        val owner = _session.value.deviceOwner
+        if (owner != null) {
+            updateSelfPresence(online = _isOnline.value)
+        }
+        if (_isOnline.value) {
+            realtimeSignaling.connectIfConfigured()
+            if (owner != null) {
+                realtimeSignaling.broadcastPresencePing(owner, isHello = true)
+            }
+        }
+    }
+
+    fun onAppBackgrounded() {
+        isAppInForeground = false
+        val owner = _session.value.deviceOwner
+        if (owner != null) {
+            updateSelfPresence(online = false)
+        }
+        // Cleanly close Realtime WebSocket while backgrounded so Android does not abort an idle socket
+        realtimeSignaling.disconnectGracefully(offlineMember = owner)
+    }
+
+    // --- Equipment-Assigned Phone Ownership (No passwords, no accidental switching) ---
+
+    fun assignThisDeviceToMember(member: FamilyMemberId) {
+        val previousOwner = _session.value.deviceOwner
+        if (previousOwner != null && previousOwner != member) {
+            realtimeSignaling.broadcastPresenceOffline(previousOwner)
+        }
+        devicePrefs.edit().putString(KEY_ASSIGNED_MEMBER, member.name).apply()
+        val alias = "kinnest_device_${member.name.lowercase()}"
+        val fp = keystore.ensureDeviceIdentityKey(alias)
         _session.update {
             it.copy(
+                deviceOwner = member,
                 activeMember = member,
                 isAuthenticated = true,
                 isDeviceTrusted = true,
                 hardwareKeyAlias = alias,
-                hardwareKeyFingerprint = expectedFp,
+                hardwareKeyFingerprint = fp,
                 isParentalUnlocked = false
             )
         }
-
+        val now = System.currentTimeMillis()
+        _memberPresence.update { current ->
+            current.mapValues { (id, status) ->
+                when (id) {
+                    member -> MemberPresenceStatus(id, isOnline = _isOnline.value, lastSeenMs = now)
+                    previousOwner -> status.copy(isOnline = false)
+                    else -> status
+                }
+            }
+        }
+        if (_isOnline.value) {
+            realtimeSignaling.connectIfConfigured()
+            realtimeSignaling.broadcastPresencePing(member, isHello = true)
+        }
+        _uiFeedback.tryEmit("This phone is now set to ${member.displayName} (${member.title})!")
         if (member == FamilyMemberId.ZAYN) {
             speakHelper(
-                english = "Hi Zayn Adam! Welcome to your family treehouse.",
-                malayalam = "ഹായ് സെയ്ൻ ആദം! നമ്മുടെ ഫാമിലി ട്രീഹൗസിലേക്ക് സ്വാഗതം."
+                english = "Hi Zayn Adam! Welcome to A 12 E.",
+                malayalam = "ഹായ് സെയ്ൻ ആദം! സ്വാഗതം."
             )
         }
-        return true
     }
 
-    fun signOut() {
-        _session.update {
-            it.copy(
-                activeMember = null,
-                isAuthenticated = false,
-                isParentalUnlocked = false
-            )
+    fun reassignDeviceOwner(newOwner: FamilyMemberId) {
+        assignThisDeviceToMember(newOwner)
+    }
+
+    fun signInWithDeviceBoundAvatar(member: FamilyMemberId): Boolean {
+        // Always bind the device only if unassigned; otherwise preserve the phone's assigned owner
+        val currentOwner = _session.value.deviceOwner
+        if (currentOwner == null) {
+            assignThisDeviceToMember(member)
+            return true
         }
+        if (currentOwner != member) {
+            _uiFeedback.tryEmit("This phone belongs to ${currentOwner.displayName} (${currentOwner.title}).")
+            return false
+        }
+        return true
     }
 
     fun toggleDeviceTrustSimulation(memberId: String, trusted: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
             val profile = profiles.value.firstOrNull { it.memberId == memberId } ?: return@launch
             dao.upsertProfile(profile.copy(isDeviceTrusted = trusted))
-            _uiFeedback.emit(
-                if (trusted) "${profile.displayName}'s device key authorized"
-                else "${profile.displayName}'s device key revoked"
-            )
         }
     }
 
@@ -357,45 +698,55 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         )
     }
 
-    // --- Real-Time 3-Way Video & Voice Engine (LiveKit + Core-Telecom) ---
+    // --- Real-Time 3-Way Video & Voice Engine (LiveKit + Core-Telecom + Supabase Signaling) ---
 
     fun startFamilyCall(targets: List<FamilyMemberId>) {
         val self = _session.value.activeMember ?: FamilyMemberId.MITHUN
+        val roomName = LiveKitCallEngine.DEFAULT_FAMILY_ROOM
         val allInRoom = (listOf(self) + targets).distinct()
         val participantStates = allInRoom.map { member ->
             CallParticipantState(
                 memberId = member,
                 isConnected = member == self,
                 isSpeaking = false,
-                audioLevel = if (member == self) 0.3f else 0f,
+                audioLevel = if (member == self) 0.25f else 0f,
                 isMuted = false,
-                isCameraEnabled = true,
+                isCameraEnabled = member == self,
                 activeFilter = if (member == self) _callState.value.activeFilter else ArFilterType.NONE
             )
         }
 
         _callState.update {
             it.copy(
+                roomName = roomName,
                 phase = CallPhase.DialingOutgoing(targets),
                 participants = participantStates,
                 durationSeconds = 0L,
-                networkQualityLabel = "LiveKit SFU • H.264 • Opus AEC/NS/AGC"
+                networkQualityLabel = "Connecting your call…"
             )
         }
+
+        // Ring other family devices immediately over Supabase Realtime Broadcast
+        realtimeSignaling.broadcastCallInvite(
+            caller = self,
+            targets = targets.filter { it != self },
+            roomName = roomName,
+            isThreeWay = allInRoom.size >= 3
+        )
 
         val primaryTarget = targets.firstOrNull() ?: FamilyMemberId.MAFITHA
         telecomManager.startManagedFamilyCall(
             callerOrTarget = primaryTarget,
             isIncoming = false,
             isVideo = true,
-            onAnswered = { connectCallMedia(allInRoom) },
+            onAnswered = { connectCallMedia(allInRoom, roomName) },
             onDisconnected = { endCallInternal("Call ended") }
         )
 
         viewModelScope.launch {
-            delay(900)
+            delay(450)
             if (_callState.value.phase is CallPhase.DialingOutgoing) {
-                connectCallMedia(allInRoom)
+                connectCallMedia(allInRoom, roomName)
             }
         }
     }
@@ -408,10 +759,11 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         )
         _callState.update {
             it.copy(
+                roomName = LiveKitCallEngine.DEFAULT_FAMILY_ROOM,
                 phase = CallPhase.RingingIncoming(
                     caller = caller,
                     isThreeWay = isThreeWay,
-                    roomName = "kinnest-family-room"
+                    roomName = LiveKitCallEngine.DEFAULT_FAMILY_ROOM
                 )
             )
         }
@@ -419,14 +771,14 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
 
     fun acceptIncomingCall() {
         val incoming = _callState.value.phase as? CallPhase.RingingIncoming ?: return
-        val self = _session.value.activeMember ?: FamilyMemberId.ZAYN
+        val self = _session.value.activeMember ?: FamilyMemberId.MAFITHA
         val members = if (incoming.isThreeWay) {
             listOf(self, FamilyMemberId.MITHUN, FamilyMemberId.MAFITHA, FamilyMemberId.ZAYN).distinct()
         } else {
             listOf(self, incoming.caller).distinct()
         }
         telecomManager.cancelIncomingCallNotification()
-        connectCallMedia(members)
+        connectCallMedia(members, incoming.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM })
     }
 
     fun declineIncomingCall() {
@@ -453,45 +805,63 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun inviteThirdMemberMidCall(member: FamilyMemberId) {
+        val self = _session.value.activeMember ?: FamilyMemberId.MITHUN
+        realtimeSignaling.broadcastCallInvite(
+            caller = self,
+            targets = listOf(member),
+            roomName = _callState.value.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM },
+            isThreeWay = true
+        )
         _callState.update { state ->
             if (state.participants.any { it.memberId == member }) return@update state
             state.copy(
                 participants = state.participants + CallParticipantState(
                     memberId = member,
-                    isConnected = true,
-                    isSpeaking = true,
-                    audioLevel = 0.65f,
+                    isConnected = false,
+                    isSpeaking = false,
+                    audioLevel = 0f,
                     isMuted = false,
-                    isCameraEnabled = true
+                    isCameraEnabled = false
                 )
             )
         }
-        _uiFeedback.tryEmit("${member.displayName} joined the 3-way family stream!")
+        _uiFeedback.tryEmit("Ringing ${member.displayName} to join the family call!")
     }
 
-    private fun connectCallMedia(members: List<FamilyMemberId>) {
+    private fun connectCallMedia(members: List<FamilyMemberId>, roomName: String) {
+        val self = _session.value.activeMember ?: FamilyMemberId.MITHUN
         viewModelScope.launch {
-            liveKitEngine.connectToFamilyRoom(token = "", enableMic = true, enableCamera = true)
             CallForegroundService.start(
                 appContext,
                 members.joinToString(", ") { it.displayName }
             )
             _callState.update { state ->
                 state.copy(
+                    roomName = roomName,
                     phase = CallPhase.Active,
                     participants = members.map { member ->
                         CallParticipantState(
                             memberId = member,
-                            isConnected = true,
-                            isSpeaking = member != _session.value.activeMember,
-                            audioLevel = 0.55f,
+                            isConnected = member == self,
+                            isSpeaking = false,
+                            audioLevel = if (member == self) 0.25f else 0f,
                             isMuted = false,
-                            isCameraEnabled = true
+                            isCameraEnabled = member == self
                         )
                     }
                 )
             }
             startCallTimerAndWaveformLoop()
+
+            val connectResult = liveKitEngine.connectToFamilyRoom(
+                member = self,
+                roomName = roomName,
+                enableMic = !_callState.value.isLocalMicMuted,
+                enableCamera = _callState.value.isLocalCameraOn
+            )
+            connectResult.onFailure {
+                _uiFeedback.tryEmit("Couldn't connect the call right now — please check internet.")
+            }
         }
     }
 
@@ -518,16 +888,21 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         callTimerJob = viewModelScope.launch {
             while (_callState.value.phase is CallPhase.Active || _callState.value.phase is CallPhase.Reconnecting) {
                 delay(1000)
+                val liveActive = liveKitEngine.isLiveStreamActive.value
                 _callState.update { state ->
                     val nextSec = state.durationSeconds + 1
-                    val updatedParticipants = state.participants.mapIndexed { idx, p ->
-                        val pulse = ((nextSec + idx) % 3L == 0L) && !p.isMuted
-                        p.copy(
-                            isSpeaking = pulse,
-                            audioLevel = if (p.isMuted) 0f else if (pulse) 0.82f else 0.24f
-                        )
+                    if (liveActive) {
+                        state.copy(durationSeconds = nextSec)
+                    } else {
+                        val updatedParticipants = state.participants.mapIndexed { idx, p ->
+                            val pulse = ((nextSec + idx) % 3L == 0L) && !p.isMuted
+                            p.copy(
+                                isSpeaking = pulse,
+                                audioLevel = if (p.isMuted) 0f else if (pulse) 0.82f else 0.24f
+                            )
+                        }
+                        state.copy(durationSeconds = nextSec, participants = updatedParticipants)
                     }
-                    state.copy(durationSeconds = nextSec, participants = updatedParticipants)
                 }
             }
         }
@@ -567,7 +942,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
 
     fun flipCamera() {
         val nextFront = !_callState.value.isFrontCamera
-        viewModelScope.launch { liveKitEngine.switchCamera(nextFront) }
+        viewModelScope.launch { liveKitEngine.switchCamera() }
         _callState.update { it.copy(isFrontCamera = nextFront) }
     }
 
@@ -585,15 +960,15 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _callState.update {
                 it.copy(
-                    phase = CallPhase.Reconnecting("Switching Wi-Fi → 5G seamlessly…"),
-                    networkQualityLabel = "Reconnecting ICE/SFU…"
+                    phase = CallPhase.Reconnecting("Reconnecting call…"),
+                    networkQualityLabel = "Reconnecting…"
                 )
             }
             delay(1800)
             _callState.update {
                 it.copy(
                     phase = CallPhase.Active,
-                    networkQualityLabel = "5G SFU Handover • H.264 + Opus"
+                    networkQualityLabel = "Connected"
                 )
             }
         }
@@ -688,6 +1063,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
             isSafetyAlert = isSafetyAlert,
             timestampMs = System.currentTimeMillis()
         )
+        realtimeSignaling.broadcastHeartbeat(sender, label, isSafetyAlert)
         sendMessage(
             threadId = "family_group",
             plaintext = if (isSafetyAlert) "🚨 SAFETY ALERT: $label" else "💖 Heartbeat: $label",
@@ -717,12 +1093,12 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                 val durationSec = (result.durationMs / 1000L).coerceIn(1L, 60L)
                 sendMessage(
                     threadId = _session.value.selectedThreadId,
-                    plaintext = "🎙️ Walkie-Talkie Voice Clip (${durationSec}s AAC)",
+                    plaintext = "🎙️ Voice Note (${durationSec}s)",
                     type = MessageType.VOICE_AAC,
                     mediaLocalPath = result.file.absolutePath,
                     expedited = true
                 )
-                _uiFeedback.tryEmit("Sent ${durationSec}s Walkie-Talkie voice clip!")
+                _uiFeedback.tryEmit("Sent ${durationSec}s voice note!")
             }
             is StopRecordingResult.TooShort -> {
                 _uiFeedback.tryEmit("Hold the orange button while talking to send a voice clip!")
@@ -787,6 +1163,16 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                 timestampMs = now
             )
             dao.upsertMessage(entity)
+
+            realtimeSignaling.broadcastChatMessage(
+                messageId = msgId,
+                sender = sender,
+                threadId = threadId,
+                recipientsCsv = recipients,
+                text = plaintext,
+                messageType = type.name,
+                timestampMs = now
+            )
 
             if (!_isOnline.value || syncRepo.isSupabaseConfigured()) {
                 val dto = SupabaseMessageDto(
@@ -1010,10 +1396,250 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         _storyPageIndex.value = index.coerceIn(0, 3)
     }
 
+    // --- Shared Daily Family Comic Photo Timeline ---
+
+    fun getTodayDateKey(): String = DailyTurnSchedule.todayDateKey()
+
+    fun getTodayTurnMember(): FamilyMemberId = DailyTurnSchedule.turnMemberForDay()
+
+    fun createAndPostDailyComic(
+        sourceUri: Uri,
+        caption: String,
+        style: ComicPhotoStyle,
+        author: FamilyMemberId
+    ) {
+        val dateKey = DailyTurnSchedule.todayDateKey()
+        if (dailyComicPhotos.value.any { it.dateKey == dateKey }) {
+            _uiFeedback.tryEmit("Today's family comic photo is already posted!")
+            return
+        }
+        viewModelScope.launch {
+            _dailyComicGenState.value = DailyComicGenerationState.Loading(style.label)
+            val result = dailyComicRepo.stylizePhotoToComic(
+                sourceUri = sourceUri,
+                style = style,
+                dateKey = dateKey,
+                author = author
+            )
+            result.onSuccess { comic ->
+                val photoId = "comic_${UUID.randomUUID()}"
+                val now = System.currentTimeMillis()
+                dao.upsertDailyComicPhoto(
+                    DailyComicPhotoEntity(
+                        dateKey = dateKey,
+                        id = photoId,
+                        authorId = author.name,
+                        caption = caption,
+                        comicStyle = style.id,
+                        localImagePath = comic.localImagePath,
+                        reactionEmoji = null,
+                        createdAtMs = now
+                    )
+                )
+                realtimeSignaling.broadcastDailyComicPhoto(
+                    photoId = photoId,
+                    dateKey = dateKey,
+                    author = author,
+                    caption = caption,
+                    comicStyle = style.id,
+                    imageBase64 = comic.shareBase64,
+                    timestampMs = now
+                )
+                _dailyComicGenState.value = DailyComicGenerationState.Idle
+                _uiFeedback.tryEmit("Today's comic photo is live on our family timeline!")
+            }.onFailure { err ->
+                _dailyComicGenState.value = DailyComicGenerationState.Error(
+                    err.localizedMessage ?: "Couldn't create your comic photo. Please try again."
+                )
+            }
+        }
+    }
+
+    fun reactToDailyComic(dateKey: String, emoji: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.updateDailyComicReaction(dateKey, emoji)
+        }
+    }
+
+    fun clearDailyComicError() {
+        if (_dailyComicGenState.value is DailyComicGenerationState.Error) {
+            _dailyComicGenState.value = DailyComicGenerationState.Idle
+        }
+    }
+
+    // --- Premium 2-of-3 Family XOXO Game Engine (Live 2-Phone + Pass & Play) ---
+
+    private fun defaultXoxoStateFor(owner: FamilyMemberId?): XoxoGameState {
+        val px = owner ?: FamilyMemberId.MITHUN
+        val po = when (px) {
+            FamilyMemberId.MITHUN -> FamilyMemberId.ZAYN
+            FamilyMemberId.MAFITHA -> FamilyMemberId.ZAYN
+            FamilyMemberId.ZAYN -> FamilyMemberId.MITHUN
+        }
+        return XoxoGameState(playerX = px, playerO = po)
+    }
+
+    fun selectXoxoPlayers(playerX: FamilyMemberId, playerO: FamilyMemberId) {
+        if (playerX == playerO) return
+        val prev = _xoxoState.value
+        val samePair = setOf(prev.playerX, prev.playerO) == setOf(playerX, playerO)
+        val updated = prev.copy(
+            board = List(9) { "" },
+            playerX = playerX,
+            playerO = playerO,
+            currentTurn = XoxoMark.X,
+            startingMark = XoxoMark.X,
+            winnerMark = null,
+            winningLine = emptyList(),
+            isDraw = false,
+            xScore = if (samePair) prev.xScore else 0,
+            oScore = if (samePair) prev.oScore else 0,
+            drawScore = if (samePair) prev.drawScore else 0,
+            roundNumber = if (samePair) prev.roundNumber else 1,
+            lastUpdatedMs = System.currentTimeMillis()
+        )
+        _xoxoState.value = updated
+        broadcastXoxoIfLive(updated)
+    }
+
+    fun swapXoxoSides() {
+        val prev = _xoxoState.value
+        val updated = prev.copy(
+            board = List(9) { "" },
+            playerX = prev.playerO,
+            playerO = prev.playerX,
+            currentTurn = XoxoMark.X,
+            startingMark = XoxoMark.X,
+            winnerMark = null,
+            winningLine = emptyList(),
+            isDraw = false,
+            xScore = prev.oScore,
+            oScore = prev.xScore,
+            lastUpdatedMs = System.currentTimeMillis()
+        )
+        _xoxoState.value = updated
+        broadcastXoxoIfLive(updated)
+    }
+
+    fun setXoxoPlayMode(mode: XoxoPlayMode) {
+        val updated = _xoxoState.value.copy(
+            playMode = mode,
+            lastUpdatedMs = System.currentTimeMillis()
+        )
+        _xoxoState.value = updated
+        if (mode == XoxoPlayMode.LIVE_TWO_PHONES) {
+            broadcastXoxoIfLive(updated)
+        }
+    }
+
+    fun makeXoxoMove(cellIndex: Int) {
+        if (cellIndex !in 0..8) return
+        val state = _xoxoState.value
+        if (state.isGameOver || state.board[cellIndex].isNotEmpty()) return
+
+        val self = _session.value.deviceOwner ?: _session.value.activeMember ?: FamilyMemberId.MITHUN
+        if (state.playMode == XoxoPlayMode.LIVE_TWO_PHONES && state.currentTurnMember != self) {
+            val isParticipant = self == state.playerX || self == state.playerO
+            if (isParticipant) {
+                _uiFeedback.tryEmit("Waiting for ${state.currentTurnMember.displayName}'s turn!")
+            } else {
+                _uiFeedback.tryEmit("You're watching live — tap your name above to jump in!")
+            }
+            return
+        }
+
+        val nextBoard = state.board.toMutableList()
+        nextBoard[cellIndex] = state.currentTurn.name
+
+        val winLine = findWinningLine(nextBoard, state.currentTurn.name)
+        val winner = if (winLine.isNotEmpty()) state.currentTurn else null
+        val isDraw = winner == null && nextBoard.none { it.isEmpty() }
+
+        val updated = state.copy(
+            board = nextBoard,
+            currentTurn = if (winner == null && !isDraw) state.currentTurn.opposite() else state.currentTurn,
+            winnerMark = winner,
+            winningLine = winLine,
+            isDraw = isDraw,
+            xScore = state.xScore + if (winner == XoxoMark.X) 1 else 0,
+            oScore = state.oScore + if (winner == XoxoMark.O) 1 else 0,
+            drawScore = state.drawScore + if (isDraw) 1 else 0,
+            lastUpdatedMs = System.currentTimeMillis()
+        )
+        _xoxoState.value = updated
+        broadcastXoxoIfLive(updated)
+    }
+
+    fun startNextXoxoRound() {
+        val state = _xoxoState.value
+        val nextStarter = state.startingMark.opposite()
+        val updated = state.copy(
+            board = List(9) { "" },
+            currentTurn = nextStarter,
+            startingMark = nextStarter,
+            winnerMark = null,
+            winningLine = emptyList(),
+            isDraw = false,
+            roundNumber = state.roundNumber + 1,
+            lastUpdatedMs = System.currentTimeMillis()
+        )
+        _xoxoState.value = updated
+        broadcastXoxoIfLive(updated)
+    }
+
+    fun resetXoxoMatchScores() {
+        val state = _xoxoState.value
+        val updated = state.copy(
+            board = List(9) { "" },
+            currentTurn = XoxoMark.X,
+            startingMark = XoxoMark.X,
+            winnerMark = null,
+            winningLine = emptyList(),
+            isDraw = false,
+            xScore = 0,
+            oScore = 0,
+            drawScore = 0,
+            roundNumber = 1,
+            lastUpdatedMs = System.currentTimeMillis()
+        )
+        _xoxoState.value = updated
+        broadcastXoxoIfLive(updated)
+    }
+
+    private fun findWinningLine(board: List<String>, mark: String): List<Int> {
+        val lines = listOf(
+            listOf(0, 1, 2),
+            listOf(3, 4, 5),
+            listOf(6, 7, 8),
+            listOf(0, 3, 6),
+            listOf(1, 4, 7),
+            listOf(2, 5, 8),
+            listOf(0, 4, 8),
+            listOf(2, 4, 6)
+        )
+        return lines.firstOrNull { line -> line.all { board[it] == mark } } ?: emptyList()
+    }
+
+    private fun broadcastXoxoIfLive(state: XoxoGameState) {
+        if (state.playMode != XoxoPlayMode.LIVE_TWO_PHONES) return
+        val sender = _session.value.deviceOwner ?: _session.value.activeMember ?: FamilyMemberId.MITHUN
+        val encoded = runCatching { json.encodeToString(state) }.getOrNull() ?: return
+        realtimeSignaling.broadcastXoxoState(sender = sender, stateJson = encoded)
+    }
+
     override fun onCleared() {
         super.onCleared()
+        presenceLoopJob?.cancel()
+        realtimeSignaling.disconnectGracefully(offlineMember = _session.value.deviceOwner)
+        liveKitEngine.disconnect()
         voiceCapture.release()
         val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         networkCallback?.let { runCatching { cm.unregisterNetworkCallback(it) } }
+    }
+
+    companion object {
+        private const val PREFS_DEVICE_BINDING = "holymoly_device_binding"
+        private const val KEY_ASSIGNED_MEMBER = "assigned_member_id"
+        private const val PRESENCE_TIMEOUT_MS = 30_000L
     }
 }

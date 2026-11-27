@@ -104,7 +104,7 @@ fun IncomingCallOverlayScreen(
                 color = Color.White.copy(alpha = 0.16f)
             ) {
                 Text(
-                    text = if (isThreeWay) "3-Way Family Video Call" else "KinNest Private Video Call",
+                    text = if (isThreeWay) "3-Way Family Video Call" else "Holy Moly ! Private Video Call",
                     style = MaterialTheme.typography.labelLarge,
                     color = Color.White,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
@@ -141,7 +141,7 @@ fun IncomingCallOverlayScreen(
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    text = "Core-Telecom Lock-Screen Wake • LiveKit SFU",
+                    text = "Calling on Holy Moly ! • Tap Accept to join",
                     style = MaterialTheme.typography.bodyLarge,
                     color = Color.White.copy(alpha = 0.8f),
                     textAlign = TextAlign.Center

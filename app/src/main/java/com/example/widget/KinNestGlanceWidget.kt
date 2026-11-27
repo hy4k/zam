@@ -70,7 +70,7 @@ class KinNestGlanceWidget : GlanceAppWidget() {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "KinNest • Mithun, Mafitha & Zayn",
+                text = "Holy Moly ! • Mithun, Mafitha & Zayn",
                 style = TextStyle(
                     color = ColorProvider(Color(0xFF0F766E)),
                     fontSize = 14.sp,

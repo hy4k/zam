@@ -85,8 +85,8 @@ fun ChatBubbleScreen(
     val threads = listOf(
         ChatThreadOption("family_group", "3-Way Family"),
         ChatThreadOption("mithun_mafitha", "Mithun & Mafitha"),
-        ChatThreadOption("mithun_zayn", "Papa & Zayn"),
-        ChatThreadOption("mafitha_zayn", "Mama & Zayn")
+        ChatThreadOption("mithun_zayn", "Vapi & Zayn"),
+        ChatThreadOption("mafitha_zayn", "Ummi & Zayn")
     )
     val threadMessages = allMessages
         .filter { it.threadId == session.selectedThreadId }
@@ -123,13 +123,13 @@ fun ChatBubbleScreen(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Rounded.Lock,
-                    contentDescription = "End-to-End Encrypted",
+                    contentDescription = "Private family chat",
                     tint = MintTreehouseDeep,
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "E2EE Keystore Vault • Delivery & Read Receipts",
+                    text = "Private Family Chat • Just Mithun, Mafitha & Zayn",
                     style = MaterialTheme.typography.labelMedium,
                     color = MintTreehouseDeep
                 )
@@ -228,7 +228,7 @@ fun ChatBubbleScreen(
                         if (!msg.mediaLocalPath.isNullOrBlank() && msg.messageType == MessageType.PHOTO.name) {
                             AsyncImage(
                                 model = msg.mediaLocalPath,
-                                contentDescription = "Encrypted shared photo",
+                                contentDescription = "Shared family photo",
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -249,7 +249,7 @@ fun ChatBubbleScreen(
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.PlayArrow,
-                                    contentDescription = "Play AAC voice clip",
+                                    contentDescription = "Play voice note",
                                     tint = MaterialTheme.colorScheme.onSurface
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -292,7 +292,7 @@ fun ChatBubbleScreen(
                                     modifier = Modifier.clickable(onClick = onRetrySync)
                                 ) {
                                     Text(
-                                        text = "Queued • Retry",
+                                        text = "Sending… Tap to retry",
                                         style = MaterialTheme.typography.labelMedium,
                                         color = Color(0xFF92400E),
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -354,7 +354,7 @@ fun ChatBubbleScreen(
             OutlinedTextField(
                 value = draftText,
                 onValueChange = { draftText = it },
-                placeholder = { Text("Encrypted note…") },
+                placeholder = { Text("Say hi to the family…") },
                 singleLine = true,
                 shape = RoundedCornerShape(22.dp),
                 modifier = Modifier
@@ -377,7 +377,7 @@ fun ChatBubbleScreen(
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Rounded.Send,
-                    contentDescription = "Send encrypted message",
+                    contentDescription = "Send message",
                     tint = Color.White
                 )
             }

@@ -44,13 +44,12 @@ import androidx.compose.material.icons.rounded.SpeakerPhone
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material.icons.rounded.VideocamOff
-import androidx.compose.material.icons.rounded.WifiProtectedSetup
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -92,11 +91,18 @@ import com.example.ui.theme.PurpleChest
 import com.example.ui.theme.WalkieAmber
 import com.example.ui.theme.claymorphic
 import com.example.ui.theme.liquidGlass
+import io.livekit.android.renderer.TextureViewRenderer
+import io.livekit.android.room.Room
+import io.livekit.android.room.track.VideoTrack
 
 @Composable
 fun ActiveVideoCallScreen(
     selfMember: FamilyMemberId,
     callState: CallState,
+    liveKitRoom: Room?,
+    isLiveStreamActive: Boolean,
+    videoTracksByMember: Map<FamilyMemberId, VideoTrack>,
+    connectedLiveMembers: Set<FamilyMemberId>,
     liveStrokes: List<LiveStroke>,
     onToggleMic: () -> Unit,
     onToggleCamera: () -> Unit,
@@ -108,7 +114,6 @@ fun ActiveVideoCallScreen(
     onTriggerScreenTap: () -> Unit,
     onToggleDrawingOverlay: () -> Unit,
     onCommitDrawingStroke: (Color, Float, List<Pair<Float, Float>>) -> Unit,
-    onSimulateHandoff: () -> Unit,
     onMediaPermissionsChanged: (cameraGranted: Boolean, audioGranted: Boolean) -> Unit,
     onEndCall: () -> Unit
 ) {
@@ -195,19 +200,34 @@ fun ActiveVideoCallScreen(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (callState.phase is CallPhase.Reconnecting) {
-                            callState.phase.reason
-                        } else {
-                            "Family Live • $formattedDuration"
-                        },
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color.White
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = if (callState.phase is CallPhase.Reconnecting) {
+                                callState.phase.reason
+                            } else {
+                                "Family Live • $formattedDuration"
+                            },
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isLiveStreamActive) EmeraldAccept else WalkieAmber
+                        ) {
+                            Text(
+                                text = if (isLiveStreamActive) "LIVE" else "READY",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                     Text(
                         text = callState.networkQualityLabel,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(alpha = 0.78f)
+                        color = Color.White.copy(alpha = 0.78f),
+                        maxLines = 2
                     )
                 }
                 if (missingThirdMember != null) {
@@ -237,16 +257,6 @@ fun ActiveVideoCallScreen(
                         }
                     }
                 }
-                IconButton(
-                    onClick = onSimulateHandoff,
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.WifiProtectedSetup,
-                        contentDescription = "Test Wi-Fi to 5G handoff",
-                        tint = Color.White
-                    )
-                }
             }
 
             // Unblurred 3-Way Split Video Grid (Active Speaker + Concurrent Full-Duplex)
@@ -260,6 +270,10 @@ fun ActiveVideoCallScreen(
                 VideoParticipantTile(
                     participant = primary,
                     isLocalSelf = primary.memberId == selfMember,
+                    liveKitRoom = liveKitRoom,
+                    liveVideoTrack = videoTracksByMember[primary.memberId],
+                    isLiveStreamActive = isLiveStreamActive,
+                    isMemberJoinedLive = primary.memberId in connectedLiveMembers,
                     hasCameraPerm = hasCameraPerm,
                     isCameraOn = callState.isLocalCameraOn,
                     isFrontCamera = callState.isFrontCamera,
@@ -280,6 +294,10 @@ fun ActiveVideoCallScreen(
                             VideoParticipantTile(
                                 participant = p,
                                 isLocalSelf = p.memberId == selfMember,
+                                liveKitRoom = liveKitRoom,
+                                liveVideoTrack = videoTracksByMember[p.memberId],
+                                isLiveStreamActive = isLiveStreamActive,
+                                isMemberJoinedLive = p.memberId in connectedLiveMembers,
                                 hasCameraPerm = hasCameraPerm,
                                 isCameraOn = if (p.memberId == selfMember) callState.isLocalCameraOn else p.isCameraEnabled,
                                 isFrontCamera = callState.isFrontCamera,
@@ -474,6 +492,10 @@ fun ActiveVideoCallScreen(
 private fun VideoParticipantTile(
     participant: CallParticipantState,
     isLocalSelf: Boolean,
+    liveKitRoom: Room?,
+    liveVideoTrack: VideoTrack?,
+    isLiveStreamActive: Boolean,
+    isMemberJoinedLive: Boolean,
     hasCameraPerm: Boolean,
     isCameraOn: Boolean,
     isFrontCamera: Boolean,
@@ -491,8 +513,16 @@ private fun VideoParticipantTile(
                 shape = RoundedCornerShape(26.dp)
             )
     ) {
-        // Unblurred video stream surface (CameraX live feed for local self when permitted)
-        if (isLocalSelf && hasCameraPerm && isCameraOn) {
+        // Real LiveKit WebRTC video surface for both local & remote family members
+        if (liveKitRoom != null && liveVideoTrack != null && (if (isLocalSelf) isCameraOn else true)) {
+            LiveKitVideoRendererView(
+                room = liveKitRoom,
+                videoTrack = liveVideoTrack,
+                mirror = isLocalSelf && isFrontCamera,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else if (isLocalSelf && !isLiveStreamActive && hasCameraPerm && isCameraOn) {
+            // Only fall back to CameraX in offline preview mode (never contend with LiveKit's camera)
             CameraXLivePreview(
                 useFrontCamera = isFrontCamera,
                 modifier = Modifier.fillMaxSize()
@@ -504,10 +534,28 @@ private fun VideoParticipantTile(
                     .background(halo.copy(alpha = 0.16f)),
                 contentAlignment = Alignment.Center
             ) {
-                FamilyMemberAvatar(
-                    member = participant.memberId,
-                    size = 86.dp
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FamilyMemberAvatar(
+                        member = participant.memberId,
+                        size = 86.dp
+                    )
+                    if (isLiveStreamActive && !isLocalSelf && !isMemberJoinedLive) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color.Black.copy(alpha = 0.55f)
+                        ) {
+                            Text(
+                                text = "Ringing • Waiting to join…",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -617,6 +665,43 @@ fun CameraXLivePreview(
 
     AndroidView(
         factory = { previewView },
+        modifier = modifier
+    )
+}
+
+@Composable
+private fun LiveKitVideoRendererView(
+    room: Room,
+    videoTrack: VideoTrack,
+    mirror: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val renderer = remember(room) {
+        TextureViewRenderer(context).also { view ->
+            runCatching { room.initVideoRenderer(view) }
+        }
+    }
+
+    LaunchedEffect(renderer, mirror) {
+        runCatching { renderer.setMirror(mirror) }
+    }
+
+    DisposableEffect(videoTrack, renderer) {
+        runCatching { videoTrack.addRenderer(renderer) }
+        onDispose {
+            runCatching { videoTrack.removeRenderer(renderer) }
+        }
+    }
+
+    DisposableEffect(renderer) {
+        onDispose {
+            runCatching { renderer.release() }
+        }
+    }
+
+    AndroidView(
+        factory = { renderer },
         modifier = modifier
     )
 }

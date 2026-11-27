@@ -13,8 +13,8 @@ enum class FamilyMemberId(
     val title: String,
     val isChild: Boolean
 ) {
-    MITHUN("Mithun", "Papa", false),
-    MAFITHA("Mafitha", "Mama", false),
+    MITHUN("Mithun", "Vapi", false),
+    MAFITHA("Mafitha", "Ummi", false),
     ZAYN("Zayn Adam", "Explorer", true)
 }
 
@@ -88,7 +88,26 @@ enum class MomentCategory(val title: String, val subtitle: String) {
     REMEMBER("Remember", "Save a little story")
 }
 
+data class MemberPresenceStatus(
+    val memberId: FamilyMemberId,
+    val isOnline: Boolean = false,
+    val lastSeenMs: Long? = null
+) {
+    fun statusLabel(isSelf: Boolean, nowMs: Long = System.currentTimeMillis()): String {
+        if (isSelf) return if (isOnline) "You • Online" else "You • Offline"
+        if (isOnline) return "Online now"
+        val seen = lastSeenMs ?: return "Offline"
+        val elapsedMin = ((nowMs - seen) / 60_000L).coerceAtLeast(0L)
+        return when {
+            elapsedMin < 1L -> "Just went offline"
+            elapsedMin < 60L -> "Seen ${elapsedMin}m ago"
+            else -> "Offline"
+        }
+    }
+}
+
 data class UserSessionState(
+    val deviceOwner: FamilyMemberId? = null,
     val activeMember: FamilyMemberId? = null,
     val isAuthenticated: Boolean = false,
     val isDeviceTrusted: Boolean = true,
@@ -151,7 +170,7 @@ data class CallState(
     val activeFilter: ArFilterType = ArFilterType.NONE,
     val showLiveDrawingOverlay: Boolean = false,
     val durationSeconds: Long = 0L,
-    val networkQualityLabel: String = "H.264 • Opus AEC/NS/AGC",
+    val networkQualityLabel: String = "Family video & voice",
     val activeEmojiBursts: List<EmojiBurstEvent> = emptyList(),
     val screenTapPulseMember: FamilyMemberId? = null,
     val recentCallLogs: List<CallLogEntry> = emptyList()
@@ -175,3 +194,49 @@ data class OfflineSyncState(
     val supabaseConfigured: Boolean = false,
     val liveKitConfigured: Boolean = false
 )
+
+@Serializable
+enum class XoxoMark {
+    X,
+    O;
+
+    fun opposite(): XoxoMark = if (this == X) O else X
+}
+
+@Serializable
+enum class XoxoPlayMode {
+    LIVE_TWO_PHONES,
+    PASS_AND_PLAY
+}
+
+@Serializable
+data class XoxoGameState(
+    val board: List<String> = List(9) { "" },
+    val playerX: FamilyMemberId = FamilyMemberId.MITHUN,
+    val playerO: FamilyMemberId = FamilyMemberId.ZAYN,
+    val currentTurn: XoxoMark = XoxoMark.X,
+    val startingMark: XoxoMark = XoxoMark.X,
+    val winnerMark: XoxoMark? = null,
+    val winningLine: List<Int> = emptyList(),
+    val isDraw: Boolean = false,
+    val xScore: Int = 0,
+    val oScore: Int = 0,
+    val drawScore: Int = 0,
+    val roundNumber: Int = 1,
+    val playMode: XoxoPlayMode = XoxoPlayMode.LIVE_TWO_PHONES,
+    val lastUpdatedMs: Long = 0L
+) {
+    val currentTurnMember: FamilyMemberId
+        get() = if (currentTurn == XoxoMark.X) playerX else playerO
+
+    val winnerMember: FamilyMemberId?
+        get() = when (winnerMark) {
+            XoxoMark.X -> playerX
+            XoxoMark.O -> playerO
+            null -> null
+        }
+
+    val isGameOver: Boolean
+        get() = winnerMark != null || isDraw
+}
+

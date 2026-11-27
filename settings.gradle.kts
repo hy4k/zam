@@ -23,6 +23,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "KinNest"
+rootProject.name = "Holy Moly !"
 
 include(":app")
