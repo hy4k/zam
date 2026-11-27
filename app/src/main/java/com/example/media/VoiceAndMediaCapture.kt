@@ -141,22 +141,36 @@ class VoiceAndMediaCapture(private val context: Context) {
             onComplete()
             return
         }
-        val file = File(path)
-        if (!file.exists() || file.length() == 0L) {
-            onComplete()
-            return
+        val isRemoteUrl = path.startsWith("https://", ignoreCase = true)
+        if (!isRemoteUrl) {
+            val file = File(path)
+            if (!file.exists() || file.length() == 0L) {
+                onComplete()
+                return
+            }
         }
         runCatching {
             player?.release()
             player = MediaPlayer().apply {
-                setDataSource(file.absolutePath)
+                setDataSource(path)
                 setOnCompletionListener {
                     it.release()
                     player = null
                     onComplete()
                 }
-                prepare()
-                start()
+                setOnErrorListener { mp, _, _ ->
+                    mp.release()
+                    player = null
+                    onComplete()
+                    true
+                }
+                if (isRemoteUrl) {
+                    setOnPreparedListener { it.start() }
+                    prepareAsync()
+                } else {
+                    prepare()
+                    start()
+                }
             }
         }.onFailure {
             onComplete()

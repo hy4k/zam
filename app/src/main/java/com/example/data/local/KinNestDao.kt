@@ -12,6 +12,9 @@ interface KinNestDao {
     @Query("SELECT * FROM user_profiles ORDER BY CASE memberId WHEN 'MITHUN' THEN 0 WHEN 'MAFITHA' THEN 1 ELSE 2 END")
     fun observeProfiles(): Flow<List<UserProfileEntity>>
 
+    @Query("SELECT * FROM user_profiles")
+    suspend fun getAllProfiles(): List<UserProfileEntity>
+
     @Query("SELECT COUNT(*) FROM user_profiles")
     suspend fun countProfiles(): Int
 
@@ -36,6 +39,12 @@ interface KinNestDao {
     @Query("UPDATE encrypted_messages SET deliveryStatus = :status WHERE id = :messageId")
     suspend fun updateMessageStatus(messageId: String, status: String)
 
+    @Query("SELECT * FROM encrypted_messages WHERE id = :id LIMIT 1")
+    suspend fun getMessageById(id: String): EncryptedMessageEntity?
+
+    @Query("UPDATE encrypted_messages SET deliveryStatus = 'DELIVERED' WHERE deliveryStatus IN ('QUEUED_OFFLINE', 'SENDING', 'FAILED')")
+    suspend fun markPendingMessagesDelivered()
+
     @Query("SELECT * FROM memory_capsules ORDER BY createdAtMs DESC")
     fun observeMemoryCapsules(): Flow<List<MemoryCapsuleEntity>>
 
@@ -59,6 +68,9 @@ interface KinNestDao {
 
     @Query("DELETE FROM offline_sync_queue WHERE status = 'SYNCED'")
     suspend fun pruneSyncedItems()
+
+    @Query("DELETE FROM offline_sync_queue")
+    suspend fun clearAllSyncItems()
 
     @Query("SELECT * FROM family_activities WHERE kind = :kind ORDER BY timestampMs DESC")
     fun observeActivitiesByKind(kind: String): Flow<List<FamilyActivityEntity>>

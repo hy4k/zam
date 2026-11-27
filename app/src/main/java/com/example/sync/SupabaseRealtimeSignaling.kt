@@ -45,6 +45,7 @@ data class FamilyRealtimeSignal(
     val dateKey: String = "",
     val comicStyle: String = "",
     val imageBase64: String = "",
+    val mediaUrl: String = "",
     val timestampMs: Long = 0L
 )
 
@@ -194,7 +195,8 @@ class SupabaseRealtimeSignaling {
         recipientsCsv: String,
         text: String,
         messageType: String,
-        timestampMs: Long
+        timestampMs: Long,
+        mediaUrl: String = ""
     ) {
         val payload = FamilyRealtimeSignal(
             kind = KIND_CHAT_MESSAGE,
@@ -204,6 +206,57 @@ class SupabaseRealtimeSignaling {
             messageId = messageId,
             text = text,
             messageType = messageType,
+            mediaUrl = mediaUrl,
+            timestampMs = timestampMs
+        )
+        sendSignal(payload)
+    }
+
+    fun broadcastProfileUpdate(
+        member: FamilyMemberId,
+        badgeElement: String,
+        avatarUrl: String?
+    ) {
+        val payload = FamilyRealtimeSignal(
+            kind = KIND_PROFILE_UPDATE,
+            senderId = member.name,
+            comicStyle = badgeElement,
+            mediaUrl = avatarUrl.orEmpty(),
+            timestampMs = System.currentTimeMillis()
+        )
+        sendSignal(payload)
+    }
+
+    fun broadcastMessageReaction(
+        sender: FamilyMemberId,
+        messageId: String,
+        emoji: String
+    ) {
+        val payload = FamilyRealtimeSignal(
+            kind = KIND_MESSAGE_REACTION,
+            senderId = sender.name,
+            messageId = messageId,
+            text = emoji,
+            timestampMs = System.currentTimeMillis()
+        )
+        sendSignal(payload)
+    }
+
+    fun broadcastParentLog(
+        author: FamilyMemberId,
+        logId: String,
+        title: String,
+        subtitle: String,
+        costEstimate: String?,
+        timestampMs: Long
+    ) {
+        val payload = FamilyRealtimeSignal(
+            kind = KIND_PARENT_LOG,
+            senderId = author.name,
+            messageId = logId,
+            text = title,
+            comicStyle = subtitle,
+            dateKey = costEstimate.orEmpty(),
             timestampMs = timestampMs
         )
         sendSignal(payload)
@@ -341,5 +394,8 @@ class SupabaseRealtimeSignaling {
         const val KIND_PRESENCE_PING = "PRESENCE_PING"
         const val KIND_PRESENCE_OFFLINE = "PRESENCE_OFFLINE"
         const val KIND_XOXO_STATE = "XOXO_STATE"
+        const val KIND_PROFILE_UPDATE = "PROFILE_UPDATE"
+        const val KIND_MESSAGE_REACTION = "MESSAGE_REACTION"
+        const val KIND_PARENT_LOG = "PARENT_LOG"
     }
 }

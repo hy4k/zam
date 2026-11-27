@@ -225,9 +225,12 @@ fun ChatBubbleScreen(
                             }
                         }
 
-                        if (!msg.mediaLocalPath.isNullOrBlank() && msg.messageType == MessageType.PHOTO.name) {
+                        val resolvedMediaSource = msg.mediaLocalPath?.takeIf { it.isNotBlank() }
+                            ?: msg.mediaRemoteUrl?.takeIf { it.isNotBlank() }
+
+                        if (!resolvedMediaSource.isNullOrBlank() && msg.messageType == MessageType.PHOTO.name) {
                             AsyncImage(
-                                model = msg.mediaLocalPath,
+                                model = resolvedMediaSource,
                                 contentDescription = "Shared family photo",
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
@@ -243,7 +246,7 @@ fun ChatBubbleScreen(
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(16.dp))
                                     .background(halo.copy(alpha = 0.22f))
-                                    .clickable { onPlayVoiceClip(msg.mediaLocalPath) }
+                                    .clickable { onPlayVoiceClip(resolvedMediaSource) }
                                     .padding(horizontal = 10.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {

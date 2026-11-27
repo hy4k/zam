@@ -50,8 +50,12 @@ import com.example.security.ParentalAuthManager
 import com.example.sync.FamilyRealtimeSignal
 import com.example.sync.KinNestSyncRepository
 import com.example.sync.OfflineSyncWorker
+import com.example.sync.SupabaseCallLogDto
 import com.example.sync.SupabaseCapsuleDto
+import com.example.sync.SupabaseFamilyMessageDto
 import com.example.sync.SupabaseMessageDto
+import com.example.sync.SupabaseParentLogDto
+import com.example.sync.SupabaseProfileDto
 import com.example.sync.SupabaseRealtimeSignaling
 import com.example.telecom.CallForegroundService
 import com.example.telecom.FamilyTelecomManager
@@ -70,6 +74,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 
 data class HeartbeatBannerAlert(
@@ -204,8 +211,12 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     init {
         viewModelScope.launch(Dispatchers.IO) {
             // Ensure initial family profiles & starter activities exist on first launch
-            if (profiles.value.isEmpty()) {
+            if (dao.countProfiles() == 0) {
                 KinNestDatabase.ensureSeeded(appContext, dao)
+            }
+            if (checkCurrentConnectivity()) {
+                flushPendingOfflineMessages()
+                hydrateFromSupabase()
             }
         }
         registerConnectivityMonitor()
@@ -218,11 +229,156 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         startPresenceLoop()
     }
 
+    private suspend fun hydrateFromSupabase() {
+        if (!syncRepo.isSupabaseConfigured() || !checkCurrentConnectivity()) return
+
+        // 1. Hydrate Family Profiles (Profile Pics, Daily Badges, Halo Colors)
+        val remoteProfiles = syncRepo.fetchAllProfiles()
+        if (remoteProfiles.isNotEmpty()) {
+            val localById = dao.getAllProfiles().associateBy { it.memberId }
+            remoteProfiles.forEach { dto ->
+                val member = runCatching { FamilyMemberId.valueOf(dto.member_id) }.getOrNull() ?: return@forEach
+                val existing = localById[dto.member_id]
+                val merged = if (existing != null) {
+                    existing.copy(
+                        displayName = dto.display_name.ifBlank { existing.displayName },
+                        roleLabel = dto.role_label.ifBlank { existing.roleLabel },
+                        customPhotoUri = dto.avatar_url?.takeIf { it.isNotBlank() } ?: existing.customPhotoUri,
+                        badgeElement = dto.badge_element.ifBlank { existing.badgeElement },
+                        haloColorHex = dto.halo_color_hex.takeIf { it != 0L } ?: existing.haloColorHex
+                    )
+                } else {
+                    UserProfileEntity(
+                        memberId = member.name,
+                        displayName = dto.display_name.ifBlank { member.displayName },
+                        roleLabel = dto.role_label.ifBlank { member.title },
+                        customPhotoUri = dto.avatar_url?.takeIf { it.isNotBlank() },
+                        badgeElement = dto.badge_element.ifBlank { BadgeElement.STARLIGHT.name },
+                        haloColorHex = dto.halo_color_hex.takeIf { it != 0L } ?: 0xFF38BDF8,
+                        deviceKeyAlias = "kinnest_device_${member.name.lowercase()}",
+                        devicePublicFingerprint = "TRUSTED-DEVICE",
+                        isDeviceTrusted = true,
+                        biometricEnabled = member != FamilyMemberId.ZAYN
+                    )
+                }
+                dao.upsertProfile(merged)
+            }
+        }
+
+        // 2. Hydrate Family Chat Messages, Voice Clips, Shared Photos/Videos & Reactions
+        val remoteMessages = syncRepo.fetchRecentMessages(limit = 150L)
+        remoteMessages.forEach { dto ->
+            val existing = dao.getMessageById(dto.id)
+            val encrypted = if (existing != null) {
+                existing.ciphertextPayload to existing.ivBase64
+            } else {
+                keystore.encryptMessageForLocalVault(dto.body)
+            }
+            dao.upsertMessage(
+                EncryptedMessageEntity(
+                    id = dto.id,
+                    threadId = dto.thread_id.ifBlank { "family_group" },
+                    senderId = dto.sender_id,
+                    recipientIdsCsv = dto.recipient_ids_csv.ifBlank { "MITHUN,MAFITHA,ZAYN" },
+                    ciphertextPayload = encrypted.first,
+                    ivBase64 = encrypted.second,
+                    decryptedPreview = dto.body,
+                    messageType = dto.message_type.ifBlank { MessageType.TEXT.name },
+                    mediaLocalPath = existing?.mediaLocalPath,
+                    mediaRemoteUrl = dto.media_url?.takeIf { it.isNotBlank() } ?: existing?.mediaRemoteUrl,
+                    reactionEmoji = dto.reaction_emoji ?: existing?.reactionEmoji,
+                    deliveryStatus = DeliveryStatus.DELIVERED.name,
+                    readByCsv = existing?.readByCsv ?: dto.sender_id,
+                    timestampMs = dto.timestamp_ms
+                )
+            )
+        }
+
+        // 3. Hydrate Live 2-of-3 XOXO Game Board & Scoreboard
+        val remoteXoxo = syncRepo.fetchXoxoGame()
+        if (remoteXoxo != null && remoteXoxo.lastUpdatedMs > _xoxoState.value.lastUpdatedMs) {
+            _xoxoState.value = remoteXoxo
+        }
+
+        // 4. Hydrate Family Online / Last-Seen Presence
+        val remotePresence = syncRepo.fetchAllPresence()
+        if (remotePresence.isNotEmpty()) {
+            val now = System.currentTimeMillis()
+            val owner = _session.value.deviceOwner
+            _memberPresence.update { current ->
+                val mutable = current.toMutableMap()
+                remotePresence.forEach { dto ->
+                    val member = runCatching { FamilyMemberId.valueOf(dto.member_id) }.getOrNull() ?: return@forEach
+                    if (member != owner) {
+                        val freshOnline = dto.is_online && dto.last_seen_ms > 0L && (now - dto.last_seen_ms) <= PRESENCE_TIMEOUT_MS
+                        val existing = mutable[member]
+                        val bestLastSeen = maxOf(dto.last_seen_ms, existing?.lastSeenMs ?: 0L).takeIf { it > 0L }
+                        mutable[member] = MemberPresenceStatus(
+                            memberId = member,
+                            isOnline = freshOnline || (existing?.isOnline == true && existing.lastSeenMs != null && (now - existing.lastSeenMs) <= PRESENCE_TIMEOUT_MS),
+                            lastSeenMs = bestLastSeen
+                        )
+                    }
+                }
+                mutable
+            }
+        }
+
+        // 5. Hydrate Parent Settings Grown-Up Logs
+        val remoteParentLogs = syncRepo.fetchParentLogs()
+        remoteParentLogs.forEach { dto ->
+            dao.upsertActivity(
+                FamilyActivityEntity(
+                    id = dto.id,
+                    kind = "PARENT_LOG",
+                    title = dto.title,
+                    subtitle = dto.subtitle,
+                    categoryOrTag = "PARENT",
+                    authorId = dto.author_id,
+                    votesCount = 1,
+                    costEstimate = dto.cost_estimate,
+                    targetDateLabel = dto.target_date_label ?: "Adults Only",
+                    isCompleted = false,
+                    timestampMs = dto.created_at_ms
+                )
+            )
+        }
+
+        // 6. Hydrate Recent Video Call Logs
+        val remoteCalls = syncRepo.fetchRecentCallLogs(limit = 20L)
+        if (remoteCalls.isNotEmpty()) {
+            val fmt = SimpleDateFormat("MMM d • h:mm a", Locale.getDefault())
+            val mapped = remoteCalls.map { dto ->
+                val names = dto.participants_csv.split(",")
+                    .mapNotNull { runCatching { FamilyMemberId.valueOf(it.trim()).displayName }.getOrNull() }
+                    .joinToString(", ")
+                    .ifBlank { dto.participants_csv }
+                val mins = dto.duration_seconds / 60L
+                val secs = dto.duration_seconds % 60L
+                CallLogEntry(
+                    id = dto.id,
+                    participantsLabel = names,
+                    callTypeLabel = if (dto.is_three_way) "3-Way Video" else "1-on-1 Video",
+                    isMissed = false,
+                    timestampLabel = fmt.format(Date(dto.started_at_ms)),
+                    durationLabel = "%02d:%02d".format(mins, secs)
+                )
+            }
+            _callState.update { it.copy(recentCallLogs = mapped) }
+        }
+    }
+
     private fun checkCurrentConnectivity(): Boolean {
         val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val network = cm.activeNetwork ?: return false
         val caps = cm.getNetworkCapabilities(network) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            (
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ||
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                )
     }
 
     private fun registerConnectivityMonitor() {
@@ -240,15 +396,39 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                 triggerSyncNow(expedited = false)
             }
 
+            override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+                val hasInternet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                val currentlyOnline = hasInternet || checkCurrentConnectivity()
+                if (_isOnline.value != currentlyOnline) {
+                    _isOnline.value = currentlyOnline
+                    updateSelfPresence(online = currentlyOnline && isAppInForeground)
+                    if (currentlyOnline && isAppInForeground) {
+                        realtimeSignaling.connectIfConfigured()
+                        triggerSyncNow(expedited = false)
+                    }
+                }
+            }
+
             override fun onLost(network: Network) {
-                _isOnline.value = false
-                updateSelfPresence(online = false)
-                realtimeSignaling.disconnect()
+                // Re-verify active default network so switching Wi-Fi <-> Cellular never shows a false offline banner
+                val stillConnected = checkCurrentConnectivity()
+                _isOnline.value = stillConnected
+                if (!stillConnected) {
+                    updateSelfPresence(online = false)
+                    realtimeSignaling.disconnect()
+                }
             }
         }
         networkCallback = cb
         runCatching {
-            cm.registerNetworkCallback(NetworkRequest.Builder().build(), cb)
+            cm.registerDefaultNetworkCallback(cb)
+        }.onFailure {
+            runCatching {
+                val request = NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build()
+                cm.registerNetworkCallback(request, cb)
+            }
         }
     }
 
@@ -409,8 +589,9 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                         )
                     }
                     SupabaseRealtimeSignaling.KIND_CHAT_MESSAGE -> {
-                        if (signal.messageId.isBlank() || signal.text.isBlank()) return@collect
+                        if (signal.messageId.isBlank() || (signal.text.isBlank() && signal.mediaUrl.isBlank())) return@collect
                         viewModelScope.launch(Dispatchers.IO) {
+                            val existing = dao.getMessageById(signal.messageId)
                             val encrypted = keystore.encryptMessageForLocalVault(signal.text)
                             dao.upsertMessage(
                                 EncryptedMessageEntity(
@@ -422,11 +603,49 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                                     ivBase64 = encrypted.second,
                                     decryptedPreview = signal.text,
                                     messageType = signal.messageType.ifBlank { MessageType.TEXT.name },
-                                    mediaLocalPath = null,
-                                    mediaRemoteUrl = null,
-                                    reactionEmoji = null,
+                                    mediaLocalPath = existing?.mediaLocalPath,
+                                    mediaRemoteUrl = signal.mediaUrl.ifBlank { existing?.mediaRemoteUrl },
+                                    reactionEmoji = existing?.reactionEmoji,
                                     deliveryStatus = DeliveryStatus.DELIVERED.name,
                                     readByCsv = sender.name,
+                                    timestampMs = signal.timestampMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+                                )
+                            )
+                        }
+                    }
+                    SupabaseRealtimeSignaling.KIND_PROFILE_UPDATE -> {
+                        viewModelScope.launch(Dispatchers.IO) {
+                            val existing = dao.getAllProfiles().firstOrNull { it.memberId == sender.name }
+                                ?: return@launch
+                            dao.upsertProfile(
+                                existing.copy(
+                                    badgeElement = signal.comicStyle.ifBlank { existing.badgeElement },
+                                    customPhotoUri = signal.mediaUrl.ifBlank { existing.customPhotoUri }
+                                )
+                            )
+                        }
+                    }
+                    SupabaseRealtimeSignaling.KIND_MESSAGE_REACTION -> {
+                        if (signal.messageId.isBlank()) return@collect
+                        viewModelScope.launch(Dispatchers.IO) {
+                            dao.updateMessageReaction(signal.messageId, signal.text.ifBlank { null })
+                        }
+                    }
+                    SupabaseRealtimeSignaling.KIND_PARENT_LOG -> {
+                        if (signal.messageId.isBlank() || signal.text.isBlank()) return@collect
+                        viewModelScope.launch(Dispatchers.IO) {
+                            dao.upsertActivity(
+                                FamilyActivityEntity(
+                                    id = signal.messageId,
+                                    kind = "PARENT_LOG",
+                                    title = signal.text,
+                                    subtitle = signal.comicStyle,
+                                    categoryOrTag = "PARENT",
+                                    authorId = sender.name,
+                                    votesCount = 1,
+                                    costEstimate = signal.dateKey.ifBlank { null },
+                                    targetDateLabel = "Adults Only",
+                                    isCompleted = false,
                                     timestampMs = signal.timestampMs.takeIf { it > 0L } ?: System.currentTimeMillis()
                                 )
                             )
@@ -474,11 +693,18 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         presenceLoopJob = viewModelScope.launch {
             var firstPing = true
             while (true) {
+                val onlineNow = checkCurrentConnectivity()
+                if (_isOnline.value != onlineNow) {
+                    _isOnline.value = onlineNow
+                }
                 val owner = _session.value.deviceOwner
                 val now = System.currentTimeMillis()
-                if (owner != null && isAppInForeground && _isOnline.value) {
+                if (owner != null && isAppInForeground && onlineNow) {
                     updateSelfPresence(online = true)
                     realtimeSignaling.broadcastPresencePing(owner, isHello = firstPing)
+                    viewModelScope.launch(Dispatchers.IO) {
+                        syncRepo.upsertPresence(owner, isOnline = true, nowMs = now)
+                    }
                     firstPing = false
                 }
                 // Expire stale remote online flags after 30 seconds without a ping
@@ -486,8 +712,8 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                     current.mapValues { (member, status) ->
                         if (member == owner) {
                             status.copy(
-                                isOnline = isAppInForeground && _isOnline.value,
-                                lastSeenMs = if (isAppInForeground && _isOnline.value) now else status.lastSeenMs
+                                isOnline = isAppInForeground && onlineNow,
+                                lastSeenMs = if (isAppInForeground && onlineNow) now else status.lastSeenMs
                             )
                         } else if (status.isOnline && status.lastSeenMs != null && (now - status.lastSeenMs) > PRESENCE_TIMEOUT_MS) {
                             status.copy(isOnline = false)
@@ -535,14 +761,23 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
 
     fun onAppForegrounded() {
         isAppInForeground = true
+        val onlineNow = checkCurrentConnectivity()
+        _isOnline.value = onlineNow
         val owner = _session.value.deviceOwner
         if (owner != null) {
-            updateSelfPresence(online = _isOnline.value)
+            updateSelfPresence(online = onlineNow)
         }
-        if (_isOnline.value) {
+        if (onlineNow) {
             realtimeSignaling.connectIfConfigured()
             if (owner != null) {
                 realtimeSignaling.broadcastPresencePing(owner, isHello = true)
+            }
+            viewModelScope.launch(Dispatchers.IO) {
+                if (owner != null) {
+                    syncRepo.upsertPresence(owner, isOnline = true, nowMs = System.currentTimeMillis())
+                }
+                flushPendingOfflineMessages()
+                hydrateFromSupabase()
             }
         }
     }
@@ -552,6 +787,9 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         val owner = _session.value.deviceOwner
         if (owner != null) {
             updateSelfPresence(online = false)
+            viewModelScope.launch(Dispatchers.IO) {
+                syncRepo.upsertPresence(owner, isOnline = false, nowMs = System.currentTimeMillis())
+            }
         }
         // Cleanly close Realtime WebSocket while backgrounded so Android does not abort an idle socket
         realtimeSignaling.disconnectGracefully(offlineMember = owner)
@@ -591,6 +829,13 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         if (_isOnline.value) {
             realtimeSignaling.connectIfConfigured()
             realtimeSignaling.broadcastPresencePing(member, isHello = true)
+            viewModelScope.launch(Dispatchers.IO) {
+                if (previousOwner != null && previousOwner != member) {
+                    syncRepo.upsertPresence(previousOwner, isOnline = false, nowMs = now)
+                }
+                syncRepo.upsertPresence(member, isOnline = true, nowMs = now)
+                hydrateFromSupabase()
+            }
         }
         _uiFeedback.tryEmit("This phone is now set to ${member.displayName} (${member.title})!")
         if (member == FamilyMemberId.ZAYN) {
@@ -632,14 +877,50 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         photoUri: String?
     ) {
         viewModelScope.launch(Dispatchers.IO) {
-            val existing = profiles.value.firstOrNull { it.memberId == member.name } ?: return@launch
+            val existing = dao.getAllProfiles().firstOrNull { it.memberId == member.name } ?: return@launch
+            val localPhotoUri = photoUri ?: existing.customPhotoUri
+            // 1. Save immediately to Room so UI updates without delay
             dao.upsertProfile(
                 existing.copy(
                     badgeElement = badge.name,
-                    customPhotoUri = photoUri ?: existing.customPhotoUri
+                    customPhotoUri = localPhotoUri
                 )
             )
-            _uiFeedback.emit("Updated ${member.displayName}'s halo & badge!")
+
+            // 2. Upload avatar JPEG to Supabase Storage & upsert family_profiles so all 3 phones sync
+            var finalAvatarUrl = localPhotoUri
+            if (checkCurrentConnectivity() && syncRepo.isSupabaseConfigured()) {
+                if (!localPhotoUri.isNullOrBlank() && !localPhotoUri.startsWith("https://")) {
+                    val uploadedUrl = syncRepo.uploadAvatarPhoto(appContext, member, localPhotoUri)
+                    if (!uploadedUrl.isNullOrBlank()) {
+                        finalAvatarUrl = uploadedUrl
+                        dao.upsertProfile(
+                            existing.copy(
+                                badgeElement = badge.name,
+                                customPhotoUri = uploadedUrl
+                            )
+                        )
+                    }
+                }
+                val remoteAvatar = finalAvatarUrl?.takeIf { it.startsWith("https://") }
+                syncRepo.upsertProfile(
+                    SupabaseProfileDto(
+                        member_id = member.name,
+                        display_name = existing.displayName,
+                        role_label = existing.roleLabel,
+                        avatar_url = remoteAvatar,
+                        badge_element = badge.name,
+                        halo_color_hex = existing.haloColorHex,
+                        updated_at_ms = System.currentTimeMillis()
+                    )
+                )
+                realtimeSignaling.broadcastProfileUpdate(
+                    member = member,
+                    badgeElement = badge.name,
+                    avatarUrl = remoteAvatar
+                )
+            }
+            _uiFeedback.emit("Updated ${member.displayName}'s photo & badge!")
         }
     }
 
@@ -1033,8 +1314,11 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         val snapshot = _callState.value
         val mins = snapshot.durationSeconds / 60
         val secs = snapshot.durationSeconds % 60
+        val callId = "call_${UUID.randomUUID()}"
+        val participantsCsv = snapshot.participants.joinToString(",") { it.memberId.name }
+            .ifBlank { (_session.value.activeMember ?: FamilyMemberId.MITHUN).name }
         val log = CallLogEntry(
-            id = UUID.randomUUID().toString(),
+            id = callId,
             participantsLabel = snapshot.participants.joinToString(", ") { it.memberId.displayName }
                 .ifBlank { "Family Call" },
             callTypeLabel = if (snapshot.participants.size >= 3) "3-Way Video" else "1-on-1 Video",
@@ -1049,6 +1333,23 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                 showLiveDrawingOverlay = false,
                 recentCallLogs = listOf(log) + it.recentCallLogs
             )
+        }
+        if (snapshot.durationSeconds > 0L) {
+            val caller = _session.value.deviceOwner ?: _session.value.activeMember ?: FamilyMemberId.MITHUN
+            val startedAtMs = (System.currentTimeMillis() - snapshot.durationSeconds * 1000L).coerceAtLeast(1L)
+            viewModelScope.launch(Dispatchers.IO) {
+                syncRepo.insertCallLog(
+                    SupabaseCallLogDto(
+                        id = callId,
+                        caller_id = caller.name,
+                        participants_csv = participantsCsv,
+                        room_name = snapshot.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM },
+                        is_three_way = snapshot.participants.size >= 3,
+                        duration_seconds = snapshot.durationSeconds,
+                        started_at_ms = startedAtMs
+                    )
+                )
+            }
         }
         _uiFeedback.tryEmit(reason)
     }
@@ -1135,12 +1436,12 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         }
 
         viewModelScope.launch(Dispatchers.IO) {
+            val onlineNow = checkCurrentConnectivity()
+            _isOnline.value = onlineNow
             val now = System.currentTimeMillis()
             val msgId = "msg_${UUID.randomUUID()}"
             val encrypted = keystore.encryptMessageForLocalVault(plaintext)
-            val initialStatus = if (_isOnline.value && syncRepo.isSupabaseConfigured()) {
-                DeliveryStatus.SENDING
-            } else if (_isOnline.value) {
+            val initialStatus = if (onlineNow) {
                 DeliveryStatus.DELIVERED
             } else {
                 DeliveryStatus.QUEUED_OFFLINE
@@ -1164,17 +1465,36 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
             )
             dao.upsertMessage(entity)
 
-            realtimeSignaling.broadcastChatMessage(
-                messageId = msgId,
-                sender = sender,
-                threadId = threadId,
-                recipientsCsv = recipients,
-                text = plaintext,
-                messageType = type.name,
-                timestampMs = now
-            )
-
-            if (!_isOnline.value || syncRepo.isSupabaseConfigured()) {
+            if (onlineNow) {
+                val remoteMediaUrl = uploadMessageMediaIfNeeded(msgId, type, mediaLocalPath)
+                if (!remoteMediaUrl.isNullOrBlank()) {
+                    dao.upsertMessage(entity.copy(mediaRemoteUrl = remoteMediaUrl))
+                }
+                syncRepo.upsertFamilyMessage(
+                    SupabaseFamilyMessageDto(
+                        id = msgId,
+                        thread_id = threadId,
+                        sender_id = sender.name,
+                        recipient_ids_csv = recipients,
+                        body = plaintext,
+                        message_type = type.name,
+                        media_url = remoteMediaUrl,
+                        reaction_emoji = null,
+                        delivery_status = DeliveryStatus.DELIVERED.name,
+                        timestamp_ms = now
+                    )
+                )
+                realtimeSignaling.broadcastChatMessage(
+                    messageId = msgId,
+                    sender = sender,
+                    threadId = threadId,
+                    recipientsCsv = recipients,
+                    text = plaintext,
+                    messageType = type.name,
+                    timestampMs = now,
+                    mediaUrl = remoteMediaUrl.orEmpty()
+                )
+            } else {
                 val dto = SupabaseMessageDto(
                     id = msgId,
                     thread_id = threadId,
@@ -1193,8 +1513,8 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                         payloadJson = json.encodeToString(dto),
                         priority = if (expedited) "EXPEDITED" else "NORMAL",
                         retryCount = 0,
-                        status = if (_isOnline.value) "PENDING" else "FAILED",
-                        lastError = if (_isOnline.value) null else "Waiting for connection",
+                        status = "PENDING",
+                        lastError = "Waiting for internet",
                         createdAtMs = now
                     )
                 )
@@ -1203,28 +1523,94 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private suspend fun uploadMessageMediaIfNeeded(
+        messageId: String,
+        type: MessageType,
+        mediaLocalPath: String?
+    ): String? {
+        if (mediaLocalPath.isNullOrBlank() || !syncRepo.isSupabaseConfigured()) return null
+        return when (type) {
+            MessageType.VOICE_AAC -> syncRepo.uploadVoiceClip(messageId, mediaLocalPath)
+            MessageType.PHOTO -> syncRepo.uploadChatPhoto(appContext, messageId, mediaLocalPath)
+            MessageType.VIDEO_MP4 -> syncRepo.uploadChatVideo(appContext, messageId, mediaLocalPath)
+            else -> null
+        }
+    }
+
     fun reactToMessage(messageId: String, emoji: String) {
+        val self = _session.value.deviceOwner ?: _session.value.activeMember ?: FamilyMemberId.MITHUN
         viewModelScope.launch(Dispatchers.IO) {
             dao.updateMessageReaction(messageId, emoji)
+            if (checkCurrentConnectivity()) {
+                syncRepo.updateRemoteMessageReaction(messageId, emoji)
+                realtimeSignaling.broadcastMessageReaction(self, messageId, emoji)
+            }
         }
+    }
+
+    private suspend fun flushPendingOfflineMessages() {
+        val pending = dao.getPendingSyncItems()
+        if (pending.isEmpty()) {
+            dao.markPendingMessagesDelivered()
+            return
+        }
+        pending.forEach { item ->
+            if (item.entityType == "MESSAGE") {
+                val localMsg = dao.getMessageById(item.entityId)
+                if (localMsg != null && localMsg.deliveryStatus == DeliveryStatus.QUEUED_OFFLINE.name) {
+                    val msgSender = runCatching { FamilyMemberId.valueOf(localMsg.senderId) }
+                        .getOrDefault(_session.value.deviceOwner ?: FamilyMemberId.MITHUN)
+                    val msgType = runCatching { MessageType.valueOf(localMsg.messageType) }
+                        .getOrDefault(MessageType.TEXT)
+                    val remoteUrl = localMsg.mediaRemoteUrl
+                        ?: uploadMessageMediaIfNeeded(localMsg.id, msgType, localMsg.mediaLocalPath)
+                    if (!remoteUrl.isNullOrBlank() && remoteUrl != localMsg.mediaRemoteUrl) {
+                        dao.upsertMessage(localMsg.copy(mediaRemoteUrl = remoteUrl))
+                    }
+                    syncRepo.upsertFamilyMessage(
+                        SupabaseFamilyMessageDto(
+                            id = localMsg.id,
+                            thread_id = localMsg.threadId,
+                            sender_id = localMsg.senderId,
+                            recipient_ids_csv = localMsg.recipientIdsCsv,
+                            body = localMsg.decryptedPreview,
+                            message_type = localMsg.messageType,
+                            media_url = remoteUrl,
+                            reaction_emoji = localMsg.reactionEmoji,
+                            delivery_status = DeliveryStatus.DELIVERED.name,
+                            timestamp_ms = localMsg.timestampMs
+                        )
+                    )
+                    realtimeSignaling.broadcastChatMessage(
+                        messageId = localMsg.id,
+                        sender = msgSender,
+                        threadId = localMsg.threadId,
+                        recipientsCsv = localMsg.recipientIdsCsv,
+                        text = localMsg.decryptedPreview,
+                        messageType = localMsg.messageType,
+                        timestampMs = localMsg.timestampMs,
+                        mediaUrl = remoteUrl.orEmpty()
+                    )
+                }
+                dao.updateMessageStatus(item.entityId, DeliveryStatus.DELIVERED.name)
+            }
+            dao.updateSyncItemStatus(item.id, "SYNCED", item.retryCount, null)
+        }
+        dao.markPendingMessagesDelivered()
+        dao.clearAllSyncItems()
+        _lastSyncedLabel.value = "Up to date"
     }
 
     fun triggerSyncNow(expedited: Boolean = true) {
         viewModelScope.launch(Dispatchers.IO) {
+            val onlineNow = checkCurrentConnectivity()
+            _isOnline.value = onlineNow
+            if (!onlineNow) return@launch
+
             _isSyncingNow.value = true
-            OfflineSyncWorker.enqueueSync(appContext, expedited = expedited)
-            delay(900)
-            val pending = dao.getPendingSyncItems()
-            if (_isOnline.value && !syncRepo.isSupabaseConfigured()) {
-                // In local demo mode without Supabase project credentials, mark local ledger synced cleanly
-                pending.forEach { item ->
-                    dao.updateSyncItemStatus(item.id, "SYNCED", item.retryCount, null)
-                    if (item.entityType == "MESSAGE") {
-                        dao.updateMessageStatus(item.entityId, DeliveryStatus.DELIVERED.name)
-                    }
-                }
-                dao.pruneSyncedItems()
-            }
+            realtimeSignaling.connectIfConfigured()
+            flushPendingOfflineMessages()
+            hydrateFromSupabase()
             _isSyncingNow.value = false
             _lastSyncedLabel.value = "Synced just now"
         }
@@ -1335,9 +1721,11 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     ) {
         val author = _session.value.activeMember ?: FamilyMemberId.MITHUN
         viewModelScope.launch(Dispatchers.IO) {
+            val id = "${kind.lowercase()}_${UUID.randomUUID()}"
+            val now = System.currentTimeMillis()
             dao.upsertActivity(
                 FamilyActivityEntity(
-                    id = "${kind.lowercase()}_${UUID.randomUUID()}",
+                    id = id,
                     kind = kind,
                     title = title,
                     subtitle = subtitle,
@@ -1347,9 +1735,30 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                     costEstimate = costOrDuration,
                     targetDateLabel = dateLabel,
                     isCompleted = false,
-                    timestampMs = System.currentTimeMillis()
+                    timestampMs = now
                 )
             )
+            if (kind == "PARENT_LOG" && checkCurrentConnectivity()) {
+                syncRepo.upsertParentLog(
+                    SupabaseParentLogDto(
+                        id = id,
+                        author_id = author.name,
+                        title = title,
+                        subtitle = subtitle,
+                        cost_estimate = costOrDuration,
+                        target_date_label = dateLabel ?: "Adults Only",
+                        created_at_ms = now
+                    )
+                )
+                realtimeSignaling.broadcastParentLog(
+                    author = author,
+                    logId = id,
+                    title = title,
+                    subtitle = subtitle,
+                    costEstimate = costOrDuration,
+                    timestampMs = now
+                )
+            }
         }
     }
 
@@ -1621,6 +2030,11 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun broadcastXoxoIfLive(state: XoxoGameState) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (checkCurrentConnectivity()) {
+                syncRepo.upsertXoxoGame(state)
+            }
+        }
         if (state.playMode != XoxoPlayMode.LIVE_TWO_PHONES) return
         val sender = _session.value.deviceOwner ?: _session.value.activeMember ?: FamilyMemberId.MITHUN
         val encoded = runCatching { json.encodeToString(state) }.getOrNull() ?: return
