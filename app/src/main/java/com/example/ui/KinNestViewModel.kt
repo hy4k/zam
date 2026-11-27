@@ -1110,28 +1110,29 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun connectCallMedia(members: List<FamilyMemberId>, roomName: String) {
+        if (_callState.value.phase is CallPhase.Active) return
         val self = _session.value.activeMember ?: FamilyMemberId.MITHUN
+        _callState.update { state ->
+            state.copy(
+                roomName = roomName,
+                phase = CallPhase.Active,
+                participants = members.map { member ->
+                    CallParticipantState(
+                        memberId = member,
+                        isConnected = member == self,
+                        isSpeaking = false,
+                        audioLevel = if (member == self) 0.25f else 0f,
+                        isMuted = false,
+                        isCameraEnabled = member == self
+                    )
+                }
+            )
+        }
         viewModelScope.launch {
             CallForegroundService.start(
                 appContext,
                 members.joinToString(", ") { it.displayName }
             )
-            _callState.update { state ->
-                state.copy(
-                    roomName = roomName,
-                    phase = CallPhase.Active,
-                    participants = members.map { member ->
-                        CallParticipantState(
-                            memberId = member,
-                            isConnected = member == self,
-                            isSpeaking = false,
-                            audioLevel = if (member == self) 0.25f else 0f,
-                            isMuted = false,
-                            isCameraEnabled = member == self
-                        )
-                    }
-                )
-            }
             startCallTimerAndWaveformLoop()
 
             val connectResult = liveKitEngine.connectToFamilyRoom(

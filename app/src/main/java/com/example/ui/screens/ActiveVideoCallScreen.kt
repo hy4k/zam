@@ -53,6 +53,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -91,9 +92,10 @@ import com.example.ui.theme.LocalKinNestAccessibility
 import com.example.ui.theme.MintTreehouse
 import com.example.ui.theme.PurpleChest
 import com.example.ui.theme.WalkieAmber
+import com.example.media.LiveKitTokenProvider
 import com.example.ui.theme.claymorphic
 import com.example.ui.theme.liquidGlass
-import io.livekit.android.renderer.TextureViewRenderer
+import io.livekit.android.renderer.SurfaceViewRenderer
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.VideoTrack
 
@@ -268,22 +270,28 @@ fun ActiveVideoCallScreen(
                     .fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                val allowOfflineCameraPreview = remember {
+                    !LiveKitTokenProvider.isLiveKitUrlConfigured()
+                }
                 val primary = participants.first()
-                VideoParticipantTile(
-                    participant = primary,
-                    isLocalSelf = primary.memberId == selfMember,
-                    liveKitRoom = liveKitRoom,
-                    liveVideoTrack = videoTracksByMember[primary.memberId],
-                    isLiveStreamActive = isLiveStreamActive,
-                    isMemberJoinedLive = primary.memberId in connectedLiveMembers,
-                    hasCameraPerm = hasCameraPerm,
-                    isCameraOn = callState.isLocalCameraOn,
-                    isFrontCamera = callState.isFrontCamera,
-                    tapPulseActive = callState.screenTapPulseMember == primary.memberId,
-                    modifier = Modifier
-                        .weight(1.25f)
-                        .fillMaxWidth()
-                )
+                key(primary.memberId) {
+                    VideoParticipantTile(
+                        participant = primary,
+                        isLocalSelf = primary.memberId == selfMember,
+                        liveKitRoom = liveKitRoom,
+                        liveVideoTrack = videoTracksByMember[primary.memberId],
+                        isLiveStreamActive = isLiveStreamActive,
+                        allowOfflineCameraPreview = allowOfflineCameraPreview && callState.phase is CallPhase.Active,
+                        isMemberJoinedLive = primary.memberId in connectedLiveMembers,
+                        hasCameraPerm = hasCameraPerm,
+                        isCameraOn = callState.isLocalCameraOn,
+                        isFrontCamera = callState.isFrontCamera,
+                        tapPulseActive = callState.screenTapPulseMember == primary.memberId,
+                        modifier = Modifier
+                            .weight(1.25f)
+                            .fillMaxWidth()
+                    )
+                }
 
                 if (participants.size > 1) {
                     Row(
@@ -293,21 +301,24 @@ fun ActiveVideoCallScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         participants.drop(1).forEach { p ->
-                            VideoParticipantTile(
-                                participant = p,
-                                isLocalSelf = p.memberId == selfMember,
-                                liveKitRoom = liveKitRoom,
-                                liveVideoTrack = videoTracksByMember[p.memberId],
-                                isLiveStreamActive = isLiveStreamActive,
-                                isMemberJoinedLive = p.memberId in connectedLiveMembers,
-                                hasCameraPerm = hasCameraPerm,
-                                isCameraOn = if (p.memberId == selfMember) callState.isLocalCameraOn else p.isCameraEnabled,
-                                isFrontCamera = callState.isFrontCamera,
-                                tapPulseActive = callState.screenTapPulseMember == p.memberId,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxSize()
-                            )
+                            key(p.memberId) {
+                                VideoParticipantTile(
+                                    participant = p,
+                                    isLocalSelf = p.memberId == selfMember,
+                                    liveKitRoom = liveKitRoom,
+                                    liveVideoTrack = videoTracksByMember[p.memberId],
+                                    isLiveStreamActive = isLiveStreamActive,
+                                    allowOfflineCameraPreview = allowOfflineCameraPreview && callState.phase is CallPhase.Active,
+                                    isMemberJoinedLive = p.memberId in connectedLiveMembers,
+                                    hasCameraPerm = hasCameraPerm,
+                                    isCameraOn = if (p.memberId == selfMember) callState.isLocalCameraOn else p.isCameraEnabled,
+                                    isFrontCamera = callState.isFrontCamera,
+                                    tapPulseActive = callState.screenTapPulseMember == p.memberId,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxSize()
+                                )
+                            }
                         }
                     }
                 }
@@ -497,6 +508,7 @@ private fun VideoParticipantTile(
     liveKitRoom: Room?,
     liveVideoTrack: VideoTrack?,
     isLiveStreamActive: Boolean,
+    allowOfflineCameraPreview: Boolean,
     isMemberJoinedLive: Boolean,
     hasCameraPerm: Boolean,
     isCameraOn: Boolean,
@@ -523,7 +535,7 @@ private fun VideoParticipantTile(
                 mirror = isLocalSelf && isFrontCamera,
                 modifier = Modifier.fillMaxSize()
             )
-        } else if (isLocalSelf && liveKitRoom == null && !isLiveStreamActive && hasCameraPerm && isCameraOn) {
+        } else if (isLocalSelf && allowOfflineCameraPreview && liveKitRoom == null && !isLiveStreamActive && hasCameraPerm && isCameraOn) {
             // Only fall back to CameraX in offline preview mode (never contend with LiveKit's camera/EGL)
             CameraXLivePreview(
                 useFrontCamera = isFrontCamera,
@@ -697,11 +709,14 @@ private fun LiveKitVideoRendererView(
     val renderer = remember(room) {
         val view = runCatching {
             LayoutInflater.from(context)
-                .inflate(R.layout.view_livekit_renderer, null, false) as TextureViewRenderer
+                .inflate(R.layout.view_livekit_renderer, null, false) as SurfaceViewRenderer
         }.getOrElse {
-            TextureViewRenderer(context).apply { id = R.id.livekit_video_renderer }
+            SurfaceViewRenderer(context).apply { id = R.id.livekit_video_renderer }
         }
-        runCatching { room.initVideoRenderer(view) }
+        runCatching {
+            room.initVideoRenderer(view)
+            view.setEnableHardwareScaler(true)
+        }
         view
     }
     var attachedTrack by remember(renderer) { mutableStateOf<VideoTrack?>(null) }
@@ -710,16 +725,7 @@ private fun LiveKitVideoRendererView(
         runCatching { renderer.setMirror(mirror) }
     }
 
-    // Registered FIRST so Compose disposes renderer.release() LAST (after videoTrack is detached)
-    DisposableEffect(renderer) {
-        onDispose {
-            runCatching { attachedTrack?.removeRenderer(renderer) }
-            attachedTrack = null
-            runCatching { renderer.release() }
-        }
-    }
-
-    // Registered SECOND so Compose removes the video track sink BEFORE renderer.release() destroys EGL
+    // Registered SECOND after AndroidView/onRelease so videoTrack always detaches before EGL release
     DisposableEffect(videoTrack, renderer) {
         runCatching {
             videoTrack.addRenderer(renderer)
@@ -735,6 +741,11 @@ private fun LiveKitVideoRendererView(
 
     AndroidView(
         factory = { renderer },
+        onRelease = { view ->
+            runCatching { attachedTrack?.removeRenderer(view) }
+            attachedTrack = null
+            runCatching { view.release() }
+        },
         modifier = modifier
     )
 }

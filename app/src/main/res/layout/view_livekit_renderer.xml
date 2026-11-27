@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<io.livekit.android.renderer.TextureViewRenderer xmlns:android="http://schemas.android.com/apk/res/android"
+<io.livekit.android.renderer.SurfaceViewRenderer xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/livekit_video_renderer"
     android:layout_width="match_parent"
     android:layout_height="match_parent" />

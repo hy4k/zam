@@ -24,6 +24,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -34,6 +35,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.util.concurrent.atomic.AtomicLong
 
 @Serializable
 sealed interface LiveKitDataPacket {
@@ -81,6 +83,7 @@ class LiveKitCallEngine(private val context: Context) {
     private var room: Room? = null
     private var roomEventsJob: Job? = null
     private var localMember: FamilyMemberId = FamilyMemberId.MITHUN
+    private val callGeneration = AtomicLong(0L)
 
     private val _activeRoom = MutableStateFlow<Room?>(null)
     val activeRoom: StateFlow<Room?> = _activeRoom.asStateFlow()
@@ -127,6 +130,7 @@ class LiveKitCallEngine(private val context: Context) {
         enableMic: Boolean = true,
         enableCamera: Boolean = true
     ): Result<Boolean> {
+        callGeneration.incrementAndGet()
         localMember = member
         configureCommunicationAudio(AudioRoute.SPEAKER)
         _connectionStatusLabel.value = "Connecting your call…"
@@ -407,21 +411,33 @@ class LiveKitCallEngine(private val context: Context) {
     }
 
     fun disconnect() {
+        val gen = callGeneration.incrementAndGet()
         roomEventsJob?.cancel()
         roomEventsJob = null
-        // Clear video tracks & active state FIRST so TextureViewRenderers detach cleanly before EGL teardown
+        // 1. Clear video tracks FIRST so Compose unmounts SurfaceViewRenderers while EglBase is still valid
         _videoTracksByMember.value = emptyMap()
         _isLiveStreamActive.value = false
         _isConnected.value = false
         _connectedLiveMembers.value = emptySet()
         _speakingMembers.value = emptySet()
-        _activeRoom.value = null
-        runCatching {
-            room?.disconnect()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                audioManager.clearCommunicationDevice()
+
+        val roomToDisconnect = room
+        scope.launch {
+            // Give Compose a brief window to detach renderers from tracks before shutting down camera/EGL
+            delay(120L)
+            if (callGeneration.get() != gen) return@launch
+            runCatching { roomToDisconnect?.localParticipant?.setCameraEnabled(false) }
+            runCatching { roomToDisconnect?.localParticipant?.setMicrophoneEnabled(false) }
+            runCatching { roomToDisconnect?.disconnect() }
+            if (callGeneration.get() == gen) {
+                _activeRoom.value = null
             }
-            audioManager.mode = AudioManager.MODE_NORMAL
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    audioManager.clearCommunicationDevice()
+                }
+                audioManager.mode = AudioManager.MODE_NORMAL
+            }
         }
     }
 
