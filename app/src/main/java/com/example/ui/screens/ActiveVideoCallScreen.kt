@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.view.LayoutInflater
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -72,6 +73,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.R
 import com.example.data.model.ArFilterType
 import com.example.data.model.AudioRoute
 import com.example.data.model.CallParticipantState
@@ -521,8 +523,8 @@ private fun VideoParticipantTile(
                 mirror = isLocalSelf && isFrontCamera,
                 modifier = Modifier.fillMaxSize()
             )
-        } else if (isLocalSelf && !isLiveStreamActive && hasCameraPerm && isCameraOn) {
-            // Only fall back to CameraX in offline preview mode (never contend with LiveKit's camera)
+        } else if (isLocalSelf && liveKitRoom == null && !isLiveStreamActive && hasCameraPerm && isCameraOn) {
+            // Only fall back to CameraX in offline preview mode (never contend with LiveKit's camera/EGL)
             CameraXLivePreview(
                 useFrontCamera = isFrontCamera,
                 modifier = Modifier.fillMaxSize()
@@ -642,13 +644,22 @@ fun CameraXLivePreview(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val previewView = remember { PreviewView(context) }
+    val previewView = remember {
+        PreviewView(context).apply {
+            id = R.id.camerax_live_preview
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+        }
+    }
+    var boundCameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
 
-    LaunchedEffect(useFrontCamera) {
+    DisposableEffect(lifecycleOwner, useFrontCamera) {
+        var disposed = false
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
+            if (disposed) return@addListener
             runCatching {
                 val cameraProvider = cameraProviderFuture.get()
+                boundCameraProvider = cameraProvider
                 val preview = Preview.Builder().build().also {
                     it.surfaceProvider = previewView.surfaceProvider
                 }
@@ -661,6 +672,12 @@ fun CameraXLivePreview(
                 cameraProvider.bindToLifecycle(lifecycleOwner, selector, preview)
             }
         }, ContextCompat.getMainExecutor(context))
+
+        onDispose {
+            disposed = true
+            runCatching { boundCameraProvider?.unbindAll() }
+            boundCameraProvider = null
+        }
     }
 
     AndroidView(
@@ -678,25 +695,41 @@ private fun LiveKitVideoRendererView(
 ) {
     val context = LocalContext.current
     val renderer = remember(room) {
-        TextureViewRenderer(context).also { view ->
-            runCatching { room.initVideoRenderer(view) }
+        val view = runCatching {
+            LayoutInflater.from(context)
+                .inflate(R.layout.view_livekit_renderer, null, false) as TextureViewRenderer
+        }.getOrElse {
+            TextureViewRenderer(context).apply { id = R.id.livekit_video_renderer }
         }
+        runCatching { room.initVideoRenderer(view) }
+        view
     }
+    var attachedTrack by remember(renderer) { mutableStateOf<VideoTrack?>(null) }
 
     LaunchedEffect(renderer, mirror) {
         runCatching { renderer.setMirror(mirror) }
     }
 
-    DisposableEffect(videoTrack, renderer) {
-        runCatching { videoTrack.addRenderer(renderer) }
+    // Registered FIRST so Compose disposes renderer.release() LAST (after videoTrack is detached)
+    DisposableEffect(renderer) {
         onDispose {
-            runCatching { videoTrack.removeRenderer(renderer) }
+            runCatching { attachedTrack?.removeRenderer(renderer) }
+            attachedTrack = null
+            runCatching { renderer.release() }
         }
     }
 
-    DisposableEffect(renderer) {
+    // Registered SECOND so Compose removes the video track sink BEFORE renderer.release() destroys EGL
+    DisposableEffect(videoTrack, renderer) {
+        runCatching {
+            videoTrack.addRenderer(renderer)
+            attachedTrack = videoTrack
+        }
         onDispose {
-            runCatching { renderer.release() }
+            runCatching { videoTrack.removeRenderer(renderer) }
+            if (attachedTrack == videoTrack) {
+                attachedTrack = null
+            }
         }
     }
 

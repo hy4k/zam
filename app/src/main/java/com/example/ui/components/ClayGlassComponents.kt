@@ -122,6 +122,7 @@ fun KinNestAmbientCanvas(
             .background(brush)
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
+            if (size.width <= 0f || size.height <= 0f) return@Canvas
             // Soft atmospheric color orbs for Glassmorphism refraction
             drawCircle(
                 brush = Brush.radialGradient(

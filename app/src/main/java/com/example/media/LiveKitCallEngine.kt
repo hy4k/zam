@@ -131,6 +131,11 @@ class LiveKitCallEngine(private val context: Context) {
         configureCommunicationAudio(AudioRoute.SPEAKER)
         _connectionStatusLabel.value = "Connecting your call…"
 
+        if (LiveKitTokenProvider.isLiveKitUrlConfigured()) {
+            // Claim room immediately so CameraX offline fallback does not contend with WebRTC camera/EGL
+            getOrCreateRoom()
+        }
+
         val tokenResult = LiveKitTokenProvider.obtainRoomToken(member, roomName)
         if (tokenResult !is LiveKitTokenResult.Ready) {
             val reason = when (tokenResult) {
@@ -139,6 +144,7 @@ class LiveKitCallEngine(private val context: Context) {
                 else -> "Token unavailable"
             }
             Log.w("LiveKitCallEngine", "Falling back to preview: $reason")
+            _activeRoom.value = null
             _isLiveStreamActive.value = false
             _isConnected.value = true
             _connectionStatusLabel.value = "Waiting for family to join…"
@@ -403,6 +409,13 @@ class LiveKitCallEngine(private val context: Context) {
     fun disconnect() {
         roomEventsJob?.cancel()
         roomEventsJob = null
+        // Clear video tracks & active state FIRST so TextureViewRenderers detach cleanly before EGL teardown
+        _videoTracksByMember.value = emptyMap()
+        _isLiveStreamActive.value = false
+        _isConnected.value = false
+        _connectedLiveMembers.value = emptySet()
+        _speakingMembers.value = emptySet()
+        _activeRoom.value = null
         runCatching {
             room?.disconnect()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -410,11 +423,6 @@ class LiveKitCallEngine(private val context: Context) {
             }
             audioManager.mode = AudioManager.MODE_NORMAL
         }
-        _isConnected.value = false
-        _isLiveStreamActive.value = false
-        _videoTracksByMember.value = emptyMap()
-        _connectedLiveMembers.value = emptySet()
-        _speakingMembers.value = emptySet()
     }
 
     companion object {

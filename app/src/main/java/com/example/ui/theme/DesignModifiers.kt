@@ -1,11 +1,5 @@
 package com.example.ui.theme
 
-import android.graphics.BlurMaskFilter
-import android.graphics.Paint
-import android.graphics.RectF
-import android.graphics.RenderEffect
-import android.graphics.Shader
-import android.os.Build
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -22,35 +16,27 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * Liquid Glass Backdrop Blur Layer:
- * Applies RenderEffect.createBlurEffect(25f, 25f, TileMode.CLAMP) on API 31+
- * with graceful reduced-motion and legacy Android fallback.
+ * Liquid Glass Backdrop Layer:
+ * Kept hardware-buffer-safe across all Android GPUs and emulators (avoids RenderEffect R8
+ * AHardwareBuffer allocation failures while liquidGlass provides frosted gradients & specular rims).
  */
 fun Modifier.liquidGlassBlurLayer(
     radius: Float = 25f,
     reducedMotion: Boolean = false
-): Modifier = this.graphicsLayer {
-    if (!reducedMotion && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        renderEffect = RenderEffect
-            .createBlurEffect(radius, radius, Shader.TileMode.CLAMP)
-            .asComposeRenderEffect()
-    }
-}
+): Modifier = this
 
 /**
  * Liquid Glass 2.0 Surface + Dual Specular Bevel Rim:
@@ -82,8 +68,9 @@ fun Modifier.liquidGlass(
             )
         )
         .drawBehind {
+            if (size.width <= 0f || size.height <= 0f) return@drawBehind
             val strokePx = 1.25.dp.toPx()
-            val cornerPx = cornerRadius.toPx()
+            val cornerPx = cornerRadius.toPx().coerceAtMost(minOf(size.width, size.height) / 2f)
             // Specular diagonal glass edge
             drawRoundRect(
                 brush = Brush.linearGradient(
@@ -100,13 +87,11 @@ fun Modifier.liquidGlass(
 }
 
 /**
- * Claymorphism 2.0 Sculpted 3D Toy Surface Formula:
+ * Claymorphism 2.0 Sculpted 3D Toy Surface Formula (100% Pure Compose, zero saveLayer / BlurMaskFilter):
  * - Pillowy outer ambient shadow with surface-tinted glow
  * - Vertical matte-sheen gradient (top slightly brighter, base deeper)
- * - Dual inner inset depth inside drawWithContent:
- *   1) Bottom-right BlurMaskFilter inset shadow (+4.dp offset)
- *   2) Top-left crisp inner clay pillow highlight
- *   3) Hairline specular rim for ultra-refined physical object depth
+ * - Soft multi-layer inner inset shadow & top-left clay pillow highlight drawn with Compose brushes
+ * - Hairline specular rim for ultra-refined physical object depth without R8 AHardwareBuffer allocations
  */
 fun Modifier.claymorphic(
     cornerRadius: Dp = 28.dp,
@@ -135,66 +120,59 @@ fun Modifier.claymorphic(
         )
         .drawWithContent {
             drawContent()
-            val radiusPx = cornerRadius.toPx()
-            val offsetPx = innerOffset.toPx()
-            val blurPx = 9.dp.toPx()
+            if (size.width <= 1f || size.height <= 1f) return@drawWithContent
 
-            drawIntoCanvas { canvas ->
-                val nativeCanvas = canvas.nativeCanvas
-                val saveCount = nativeCanvas.saveLayer(0f, 0f, size.width, size.height, null)
+            val maxRadius = minOf(size.width, size.height) / 2f
+            val radiusPx = cornerRadius.toPx().coerceAtMost(maxRadius)
+            val insetStroke = innerOffset.toPx().coerceIn(2f, maxRadius)
 
-                val clipPath = android.graphics.Path().apply {
-                    addRoundRect(
-                        RectF(0f, 0f, size.width, size.height),
-                        radiusPx,
-                        radiusPx,
-                        android.graphics.Path.Direction.CW
-                    )
-                }
-                nativeCanvas.clipPath(clipPath)
-
-                // Bottom-right inner inset shadow via BlurMaskFilter
-                val darkPaint = Paint().apply {
-                    isAntiAlias = true
-                    style = Paint.Style.STROKE
-                    strokeWidth = offsetPx * 2.4f
-                    color = Color.Black.copy(alpha = innerShadowAlpha).toArgb()
-                    maskFilter = BlurMaskFilter(blurPx, BlurMaskFilter.Blur.NORMAL)
-                }
-                nativeCanvas.drawRoundRect(
-                    RectF(
-                        -offsetPx,
-                        -offsetPx,
-                        size.width + offsetPx * 0.45f,
-                        size.height + offsetPx * 0.45f
+            // Soft bottom-right inner inset depth (pure GPU gradient, no BlurMaskFilter / saveLayer)
+            drawRoundRect(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color.Transparent,
+                        Color.Transparent,
+                        Color.Black.copy(alpha = innerShadowAlpha * 0.45f),
+                        Color.Black.copy(alpha = innerShadowAlpha)
                     ),
-                    radiusPx,
-                    radiusPx,
-                    darkPaint
-                )
+                    start = Offset(0f, 0f),
+                    end = Offset(size.width, size.height)
+                ),
+                topLeft = Offset(insetStroke * 0.5f, insetStroke * 0.5f),
+                size = Size(
+                    (size.width - insetStroke).coerceAtLeast(1f),
+                    (size.height - insetStroke).coerceAtLeast(1f)
+                ),
+                cornerRadius = CornerRadius(
+                    (radiusPx - insetStroke * 0.5f).coerceAtLeast(0f),
+                    (radiusPx - insetStroke * 0.5f).coerceAtLeast(0f)
+                ),
+                style = Stroke(width = insetStroke)
+            )
 
-                // Top-left pillowy clay highlight sheen
-                val highlightPaint = Paint().apply {
-                    isAntiAlias = true
-                    style = Paint.Style.STROKE
-                    strokeWidth = offsetPx * 1.8f
-                    color = Color.White.copy(alpha = 0.52f).toArgb()
-                    maskFilter = BlurMaskFilter(blurPx, BlurMaskFilter.Blur.NORMAL)
-                }
-                nativeCanvas.drawRoundRect(
-                    RectF(
-                        offsetPx * 0.3f,
-                        offsetPx * 0.3f,
-                        size.width + offsetPx,
-                        size.height + offsetPx
+            // Top-left pillowy clay highlight sheen
+            drawRoundRect(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.52f),
+                        Color.White.copy(alpha = 0.14f),
+                        Color.Transparent,
+                        Color.Transparent
                     ),
-                    radiusPx,
-                    radiusPx,
-                    highlightPaint
-                )
-
-                nativeCanvas.restoreToCount(saveCount)
-            }
+                    start = Offset(0f, 0f),
+                    end = Offset(size.width, size.height)
+                ),
+                topLeft = Offset(insetStroke * 0.45f, insetStroke * 0.45f),
+                size = Size(
+                    (size.width - insetStroke * 0.9f).coerceAtLeast(1f),
+                    (size.height - insetStroke * 0.9f).coerceAtLeast(1f)
+                ),
+                cornerRadius = CornerRadius(
+                    (radiusPx - insetStroke * 0.45f).coerceAtLeast(0f),
+                    (radiusPx - insetStroke * 0.45f).coerceAtLeast(0f)
+                ),
+                style = Stroke(width = insetStroke * 0.85f)
+            )
 
             // Crisp 1dp hairline rim
             drawRoundRect(

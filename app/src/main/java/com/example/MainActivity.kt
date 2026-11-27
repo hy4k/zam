@@ -33,6 +33,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import coil.Coil
+import coil.ImageLoader
 import com.example.data.model.CallPhase
 import com.example.data.model.FamilyMemberId
 import com.example.data.model.MessageType
@@ -67,6 +69,12 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         // STEP 1: Configure Firebase App Check with launch intent before UI, ViewModels, or Firebase calls
         configureAppCheck(this, intent)
+        // Use software-compatible bitmaps in Coil to prevent AHardwareBuffer allocation failures on virtual GPUs
+        Coil.setImageLoader(
+            ImageLoader.Builder(applicationContext)
+                .allowHardware(false)
+                .build()
+        )
         enableEdgeToEdge()
         captureIntentExtras(intent)
 
