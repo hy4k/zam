@@ -1,7 +1,6 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -31,33 +30,33 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.EmojiEvents
+import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
@@ -73,27 +72,38 @@ import com.example.data.model.XoxoGameState
 import com.example.data.model.XoxoMark
 import com.example.data.model.XoxoPlayMode
 import com.example.ui.components.ClayActionButton
+import com.example.ui.components.ClayCircleButton
+import com.example.ui.components.ClayTextOnLight
 import com.example.ui.components.FamilyMemberAvatar
-import com.example.ui.theme.CoralSalmon
-import com.example.ui.theme.CoralSalmonDeep
+import com.example.ui.components.Text3D
+import com.example.ui.game.ArcadeAudioEngine
+import com.example.ui.game.SkyHopArcadeGame
+import com.example.ui.theme.ClayAqua
+import com.example.ui.theme.ClayAquaDeep
+import com.example.ui.theme.ClayCoral
+import com.example.ui.theme.ClayCoralDeep
+import com.example.ui.theme.ClayDeepTealInk
+import com.example.ui.theme.ClayHoney
+import com.example.ui.theme.ClayHoneyLight
+import com.example.ui.theme.ClayMutedInk
+import com.example.ui.theme.ClayPeach
+import com.example.ui.theme.ClaySage
+import com.example.ui.theme.ClayTealShadow
+import com.example.ui.theme.ClayTextCream
+import com.example.ui.theme.ClayVanilla
+import com.example.ui.theme.ClayVanillaLight
 import com.example.ui.theme.EmeraldAccept
 import com.example.ui.theme.LocalKinNestAccessibility
-import com.example.ui.theme.OchreGold
-import com.example.ui.theme.OchreGoldBright
-import com.example.ui.theme.PowderSky
-import com.example.ui.theme.StudioTeal
-import com.example.ui.theme.StudioTealDeep
+import com.example.ui.theme.claymorphic
+import com.example.ui.theme.liquidGlass
 
-private val LuxuryCabinetTop = Color(0xFF0E1D2B)
-private val LuxuryCabinetBottom = Color(0xFF07111A)
-private val LuxuryTileBg = Color(0xFF132638)
-private val LuxuryTileWinBg = Color(0xFF1F384D)
-private val ChampagneGold = Color(0xFFF3D250)
-private val NeonXPrimary = Color(0xFFFF7A59)
-private val NeonXGlow = Color(0xFFEB5E28)
-private val NeonOPrimary = Color(0xFF67E8F9)
-private val NeonOGlow = Color(0xFF38BDF8)
+private enum class PlayTabGame { SKY_CATCH, XOXO }
 
+/**
+ * Page 4 — Family Play Hub (NO top page title!).
+ * Hosts the full-viewport 60fps interactive clay arcade game ("Sky Catch")
+ * alongside the live-synced 2-of-3 Family XOXO Arena with procedural audio!
+ */
 @Composable
 fun PlayChestScreen(
     xoxoState: XoxoGameState,
@@ -109,31 +119,87 @@ fun PlayChestScreen(
 ) {
     val a11y = LocalKinNestAccessibility.current
     val haptic = LocalHapticFeedback.current
+    var activeGame by rememberSaveable { mutableStateOf(PlayTabGame.SKY_CATCH) }
     var pickingSlot by remember { mutableStateOf<XoxoMark?>(null) }
-
-    val activeAccent by animateColorAsState(
-        targetValue = when {
-            xoxoState.winnerMark == XoxoMark.X -> NeonXPrimary
-            xoxoState.winnerMark == XoxoMark.O -> NeonOPrimary
-            xoxoState.isDraw -> ChampagneGold
-            xoxoState.currentTurn == XoxoMark.X -> NeonXPrimary
-            else -> NeonOPrimary
-        },
-        animationSpec = tween(350),
-        label = "xoxo_active_accent"
-    )
 
     val isLiveMode = xoxoState.playMode == XoxoPlayMode.LIVE_TWO_PHONES
     val isSpectator = isLiveMode && selfMember != xoxoState.playerX && selfMember != xoxoState.playerO
     val isMyTurnNow = !xoxoState.isGameOver && (!isLiveMode || xoxoState.currentTurnMember == selfMember)
 
-    LazyColumn(
+    LaunchedEffect(xoxoState.winnerMember, xoxoState.roundNumber) {
+        if (activeGame == PlayTabGame.XOXO && xoxoState.winnerMember != null) {
+            ArcadeAudioEngine.playVictoryFanfare()
+        }
+    }
+
+    Column(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 1. Luxury XOXO Header + Mode Switcher
+        // Compact 2-Game Switcher Clay-Glass Pill (NO top page name!)
+        Row(
+            modifier = Modifier
+                .widthIn(max = 520.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .liquidGlass(
+                    shape = RoundedCornerShape(24.dp),
+                    surfaceAlpha = 0.88f,
+                    tintColor = ClayVanillaLight,
+                    cornerRadius = 24.dp
+                )
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            PlayGameSwitcherPill(
+                label = "Sky Catch ★",
+                icon = Icons.Rounded.SportsEsports,
+                selected = activeGame == PlayTabGame.SKY_CATCH,
+                activeColor = ClayCoral,
+                testTag = "play_switch_sky_catch",
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    activeGame = PlayTabGame.SKY_CATCH
+                }
+            )
+            PlayGameSwitcherPill(
+                label = "XOXO 2-of-3",
+                icon = Icons.Rounded.GridView,
+                selected = activeGame == PlayTabGame.XOXO,
+                activeColor = ClayAqua,
+                testTag = "play_switch_xoxo",
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    activeGame = PlayTabGame.XOXO
+                }
+            )
+        }
+
+        if (activeGame == PlayTabGame.SKY_CATCH) {
+            // Full-Viewport 60fps Interactive Clay Arcade Game Shell
+            SkyHopArcadeGame(
+                playerName = selfMember.displayName,
+                reducedMotion = a11y.reducedMotion,
+                modifier = Modifier
+                    .widthIn(max = 540.dp)
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+            return@Column
+        }
+
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+        // 1. Minimal Top Bar (NO page name!) — Round pill + Sculpted Live / 1 Phone Switcher
         item {
             Row(
                 modifier = Modifier
@@ -142,114 +208,95 @@ fun PlayChestScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column {
-                    Text(
-                        text = "FAMILY LOUNGE • ROUND ${xoxoState.roundNumber}",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            letterSpacing = 1.4.sp,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = StudioTealDeep
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = "XOXO",
-                            style = MaterialTheme.typography.headlineLarge.copy(
-                                fontWeight = FontWeight.Black,
-                                letterSpacing = 2.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .claymorphic(
+                            cornerRadius = 20.dp,
+                            surfaceColor = ClayVanillaLight,
+                            elevation = 8.dp,
+                            ledgeDepth = 3.5.dp
                         )
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = OchreGoldBright.copy(alpha = 0.25f)
-                        ) {
-                            Text(
-                                text = "2 OF 3",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.ExtraBold
-                                ),
-                                color = Color(0xFF785100),
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-                            )
-                        }
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                ) {
+                    ClayTextOnLight(
+                        text = "ROUND ${xoxoState.roundNumber}",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold),
+                        textColor = ClayDeepTealInk,
+                        depthDp = 0.8.dp
+                    )
+                    Surface(
+                        shape = CircleShape,
+                        color = ClayHoney
+                    ) {
+                        Text3D(
+                            text = "2 OF 3",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 10.sp
+                            ),
+                            extrudeColor = Color(0x558B4F08),
+                            depthDp = 0.8.dp,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                        )
                     }
                 }
 
-                // Segmented Live 2-Phone vs Same Phone Switcher
-                Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = LuxuryCabinetTop,
-                    shadowElevation = 6.dp,
-                    modifier = Modifier.border(
-                        width = 1.dp,
-                        color = ChampagneGold.copy(alpha = 0.35f),
-                        shape = RoundedCornerShape(18.dp)
-                    )
+                // Sculpted Frosted Clay-Glass Live vs 1 Phone Switcher
+                Row(
+                    modifier = Modifier
+                        .liquidGlass(
+                            shape = RoundedCornerShape(22.dp),
+                            surfaceAlpha = 0.86f,
+                            tintColor = ClayVanillaLight,
+                            cornerRadius = 22.dp
+                        )
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(3.dp),
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        ModePillButton(
-                            label = "Live",
-                            icon = Icons.Rounded.Wifi,
-                            selected = isLiveMode,
-                            testTag = "xoxo_mode_live",
-                            onClick = { onChangePlayMode(XoxoPlayMode.LIVE_TWO_PHONES) }
-                        )
-                        ModePillButton(
-                            label = "1 Phone",
-                            icon = Icons.Rounded.PhoneAndroid,
-                            selected = !isLiveMode,
-                            testTag = "xoxo_mode_local",
-                            onClick = { onChangePlayMode(XoxoPlayMode.PASS_AND_PLAY) }
-                        )
-                    }
+                    ClayModePill(
+                        label = "Live",
+                        icon = Icons.Rounded.Wifi,
+                        selected = isLiveMode,
+                        activeColor = ClayAqua,
+                        testTag = "xoxo_mode_live",
+                        onClick = { onChangePlayMode(XoxoPlayMode.LIVE_TWO_PHONES) }
+                    )
+                    ClayModePill(
+                        label = "1 Phone",
+                        icon = Icons.Rounded.PhoneAndroid,
+                        selected = !isLiveMode,
+                        activeColor = ClayCoral,
+                        testTag = "xoxo_mode_local",
+                        onClick = { onChangePlayMode(XoxoPlayMode.PASS_AND_PLAY) }
+                    )
                 }
             }
         }
 
-        // 2. Luxury Scoreboard & 2-of-3 Player Arena Selector
+        // 2. Warm Vanilla-Cream 3D Clay Scoreboard & Any-2-of-3 Picker
         item {
             Box(
                 modifier = Modifier
                     .widthIn(max = 520.dp)
                     .fillMaxWidth()
-                    .shadow(
+                    .claymorphic(
+                        cornerRadius = 30.dp,
+                        surfaceColor = ClayVanilla,
                         elevation = 14.dp,
-                        shape = RoundedCornerShape(28.dp),
-                        ambientColor = activeAccent.copy(alpha = 0.28f),
-                        spotColor = activeAccent.copy(alpha = 0.32f)
+                        shadowTint = ClayTealShadow,
+                        ledgeDepth = 6.dp
                     )
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(
-                        Brush.verticalGradient(listOf(LuxuryCabinetTop, LuxuryCabinetBottom))
-                    )
-                    .border(
-                        width = 1.4.dp,
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                ChampagneGold.copy(alpha = 0.5f),
-                                Color.White.copy(alpha = 0.12f),
-                                activeAccent.copy(alpha = 0.45f)
-                            )
-                        ),
-                        shape = RoundedCornerShape(28.dp)
-                    )
-                    .padding(14.dp)
+                    .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 18.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    // Player X vs Player O Faceoff Row
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        XoxoPlayerCard(
+                        StudioClayXoxoPlayerTile(
                             mark = XoxoMark.X,
                             member = xoxoState.playerX,
                             profile = profiles.firstOrNull { it.memberId == xoxoState.playerX.name },
@@ -258,48 +305,41 @@ fun PlayChestScreen(
                             isActiveTurn = !xoxoState.isGameOver && xoxoState.currentTurn == XoxoMark.X,
                             isWinner = xoxoState.winnerMark == XoxoMark.X,
                             isSelecting = pickingSlot == XoxoMark.X,
-                            accentColor = NeonXPrimary,
+                            clayColor = ClayCoral,
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 pickingSlot = if (pickingSlot == XoxoMark.X) null else XoxoMark.X
                             }
                         )
 
-                        // Center Swap & Draws Column
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            IconButton(
+                            ClayCircleButton(
+                                icon = Icons.Rounded.SwapHoriz,
+                                contentDescription = "Swap X and O players",
+                                clayColor = ClayHoney,
+                                iconTint = ClayTextCream,
+                                size = 44.dp,
+                                testTag = "xoxo_swap_sides_button",
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     onSwapSides()
-                                },
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.08f))
-                                    .border(1.dp, ChampagneGold.copy(alpha = 0.35f), CircleShape)
-                                    .testTag("xoxo_swap_sides_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.SwapHoriz,
-                                    contentDescription = "Swap X and O players",
-                                    tint = ChampagneGold,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                            Text(
+                                }
+                            )
+                            ClayTextOnLight(
                                 text = "TIE ${xoxoState.drawScore}",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 0.8.sp
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 10.5.sp
                                 ),
-                                color = Color(0xFF9FB6C5)
+                                textColor = ClayDeepTealInk,
+                                depthDp = 0.7.dp
                             )
                         }
 
-                        XoxoPlayerCard(
+                        StudioClayXoxoPlayerTile(
                             mark = XoxoMark.O,
                             member = xoxoState.playerO,
                             profile = profiles.firstOrNull { it.memberId == xoxoState.playerO.name },
@@ -308,7 +348,7 @@ fun PlayChestScreen(
                             isActiveTurn = !xoxoState.isGameOver && xoxoState.currentTurn == XoxoMark.O,
                             isWinner = xoxoState.winnerMark == XoxoMark.O,
                             isSelecting = pickingSlot == XoxoMark.O,
-                            accentColor = NeonOPrimary,
+                            clayColor = ClayAqua,
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 pickingSlot = if (pickingSlot == XoxoMark.O) null else XoxoMark.O
@@ -316,7 +356,7 @@ fun PlayChestScreen(
                         )
                     }
 
-                    // 1-Tap "Pick Any 2 Players" Roster Bar (all 3 family members always visible)
+                    // 1-Tap "Pick Any 2 Players" Sculpted Clay Pills
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -330,23 +370,26 @@ fun PlayChestScreen(
                             }
                             val online = memberPresence[member]?.isOnline == true
                             val pillColor = when (assignedMark) {
-                                XoxoMark.X -> NeonXPrimary.copy(alpha = 0.22f)
-                                XoxoMark.O -> NeonOPrimary.copy(alpha = 0.22f)
-                                null -> Color.White.copy(alpha = 0.06f)
+                                XoxoMark.X -> ClayPeach
+                                XoxoMark.O -> Color(0xFFD6F2F0)
+                                null -> ClayVanillaLight
                             }
-                            val borderColor = when (assignedMark) {
-                                XoxoMark.X -> NeonXPrimary
-                                XoxoMark.O -> NeonOPrimary
-                                null -> Color.White.copy(alpha = 0.16f)
+                            val badgeColor = when (assignedMark) {
+                                XoxoMark.X -> ClayCoral
+                                XoxoMark.O -> ClayAqua
+                                null -> Color.Transparent
                             }
 
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(44.dp)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(pillColor)
-                                    .border(1.2.dp, borderColor, RoundedCornerShape(14.dp))
+                                    .height(40.dp)
+                                    .claymorphic(
+                                        cornerRadius = 18.dp,
+                                        surfaceColor = pillColor,
+                                        elevation = if (assignedMark != null) 7.dp else 4.dp,
+                                        ledgeDepth = 3.dp
+                                    )
                                     .clickable {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         when {
@@ -361,8 +404,6 @@ fun PlayChestScreen(
                                                 pickingSlot = null
                                             }
                                             assignedMark == null -> {
-                                                // Instantly swap the benched 3rd member into the match as Player O
-                                                // (preserving self if self is currently playing)
                                                 if (selfMember == xoxoState.playerO) {
                                                     onSelectPlayers(member, selfMember)
                                                 } else {
@@ -370,12 +411,11 @@ fun PlayChestScreen(
                                                 }
                                             }
                                             else -> {
-                                                // Tap an active player to pick who sits in that slot
                                                 pickingSlot = assignedMark
                                             }
                                         }
                                     }
-                                    .padding(horizontal = 8.dp)
+                                    .padding(horizontal = 7.dp)
                                     .testTag("xoxo_pick_${member.name.lowercase()}"),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -387,29 +427,31 @@ fun PlayChestScreen(
                                         modifier = Modifier
                                             .size(7.dp)
                                             .clip(CircleShape)
-                                            .background(if (online) EmeraldAccept else Color(0xFF64748B))
+                                            .background(if (online) EmeraldAccept else Color(0xFFAABFC1))
                                     )
-                                    Text(
+                                    ClayTextOnLight(
                                         text = member.title,
                                         style = MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = FontWeight.Bold
+                                            fontWeight = FontWeight.ExtraBold
                                         ),
-                                        color = Color.White,
+                                        textColor = ClayDeepTealInk,
+                                        depthDp = 0.7.dp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     if (assignedMark != null) {
                                         Surface(
                                             shape = CircleShape,
-                                            color = if (assignedMark == XoxoMark.X) NeonXPrimary else NeonOPrimary
+                                            color = badgeColor
                                         ) {
-                                            Text(
+                                            Text3D(
                                                 text = assignedMark.name,
                                                 style = MaterialTheme.typography.labelSmall.copy(
-                                                    fontWeight = FontWeight.Black,
+                                                    fontWeight = FontWeight.ExtraBold,
                                                     fontSize = 10.sp
                                                 ),
-                                                color = Color(0xFF0A141E),
+                                                extrudeColor = Color(0x45174B4F),
+                                                depthDp = 0.8.dp,
                                                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                                             )
                                         }
@@ -420,10 +462,11 @@ fun PlayChestScreen(
                     }
 
                     if (pickingSlot != null) {
-                        Text(
-                            text = "Tap any family member above to assign as Player ${pickingSlot!!.name}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ChampagneGold,
+                        ClayTextOnLight(
+                            text = "Tap a family member above to play as ${pickingSlot!!.name}",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold),
+                            textColor = ClayCoralDeep,
+                            depthDp = 0.7.dp,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -432,90 +475,79 @@ fun PlayChestScreen(
             }
         }
 
-        // 3. Turn / Victory Status Pill
+        // 3. Sculpted 3D Clay Turn / Victory Banner (Aqua or Honey-Gold with Crisp 3D Cream-White Text)
         item {
             val statusText = when {
                 xoxoState.winnerMember != null -> "${xoxoState.winnerMember!!.displayName} Wins Round ${xoxoState.roundNumber}!"
-                xoxoState.isDraw -> "It's a Friendly Draw!"
-                isSpectator -> "Watching Live • ${xoxoState.currentTurnMember.displayName}'s Turn (${xoxoState.currentTurn.name})"
+                xoxoState.isDraw -> "Friendly Draw! Play Again!"
+                isSpectator -> "Watching Live • ${xoxoState.currentTurnMember.displayName}'s Turn"
                 isLiveMode && isMyTurnNow -> "Your Turn! Place ${xoxoState.currentTurn.name}"
                 isLiveMode -> "Waiting for ${xoxoState.currentTurnMember.displayName} (${xoxoState.currentTurn.name})…"
                 else -> "${xoxoState.currentTurnMember.displayName}'s Turn (${xoxoState.currentTurn.name})"
             }
+            val bannerClay = when {
+                xoxoState.isGameOver -> ClayHoney
+                xoxoState.currentTurn == XoxoMark.X -> ClayCoral
+                else -> ClayAqua
+            }
 
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = if (xoxoState.isGameOver) {
-                    activeAccent.copy(alpha = 0.22f)
-                } else {
-                    LuxuryCabinetTop.copy(alpha = 0.92f)
-                },
+            Row(
                 modifier = Modifier
                     .widthIn(max = 520.dp)
                     .fillMaxWidth()
-                    .border(
-                        width = 1.5.dp,
-                        color = activeAccent.copy(alpha = if (xoxoState.isGameOver) 0.9f else 0.55f),
-                        shape = RoundedCornerShape(20.dp)
+                    .claymorphic(
+                        cornerRadius = 24.dp,
+                        surfaceColor = bannerClay,
+                        elevation = 10.dp,
+                        shadowTint = ClayTealShadow,
+                        ledgeDepth = 4.5.dp
                     )
-                    .testTag("xoxo_status_banner")
+                    .padding(start = 16.dp, end = 16.dp, top = 11.dp, bottom = 14.dp)
+                    .testTag("xoxo_status_banner"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 11.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    if (xoxoState.winnerMember != null) {
-                        Icon(
-                            imageVector = Icons.Rounded.EmojiEvents,
-                            contentDescription = "Winner",
-                            tint = ChampagneGold,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(activeAccent)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                    }
-                    Text(
-                        text = statusText,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.ExtraBold
-                        ),
-                        color = if (xoxoState.isGameOver) MaterialTheme.colorScheme.onBackground else Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                if (xoxoState.winnerMember != null) {
+                    Icon(
+                        imageVector = Icons.Rounded.EmojiEvents,
+                        contentDescription = "Winner",
+                        tint = ClayTextCream,
+                        modifier = Modifier.size(22.dp)
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
                 }
+                Text3D(
+                    text = statusText,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.ExtraBold
+                    ),
+                    extrudeColor = Color(0x55184B4F),
+                    depthDp = 1.6.dp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
 
-        // 4. Sculpted Luxury 3x3 XOXO Game Board
+        // 4. Sculpted Warm Peach-Cream 3D Clay XOXO Board!
         item {
-            LuxuryXoxoBoard(
+            StudioClayXoxoBoard(
                 state = xoxoState,
-                activeAccent = activeAccent,
                 reducedMotion = a11y.reducedMotion,
                 onTapCell = { idx ->
                     if (!xoxoState.isGameOver && xoxoState.board[idx].isEmpty()) {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        ArcadeAudioEngine.playBoardTap(isPlayerX = xoxoState.currentTurn == XoxoMark.X)
                     }
                     onMakeMove(idx)
                 },
                 modifier = Modifier
-                    .widthIn(max = 372.dp)
+                    .widthIn(max = 356.dp)
                     .fillMaxWidth()
             )
         }
 
-        // 5. Game Controls Row (Next Round / Reset)
+        // 5. Game Controls Row (Sage/Coral Next Round + Aqua Reset)
         item {
             Row(
                 modifier = Modifier
@@ -525,10 +557,10 @@ fun PlayChestScreen(
             ) {
                 ClayActionButton(
                     text = if (xoxoState.isGameOver) "Play Next Round" else "Restart Round",
-                    containerColor = if (xoxoState.isGameOver) EmeraldAccept else StudioTealDeep,
+                    containerColor = if (xoxoState.isGameOver) ClaySage else ClayCoral,
                     icon = Icons.Rounded.Refresh,
                     testTag = "xoxo_next_round_button",
-                    minHeight = 56.dp,
+                    minHeight = 52.dp,
                     modifier = Modifier.weight(1.4f),
                     onClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -537,11 +569,10 @@ fun PlayChestScreen(
                 )
                 ClayActionButton(
                     text = "Reset",
-                    containerColor = Color(0xFF1F3444),
-                    contentColor = Color(0xFFE2EEF5),
+                    containerColor = ClayAqua,
                     icon = Icons.Rounded.RestartAlt,
                     testTag = "xoxo_reset_scores_button",
-                    minHeight = 56.dp,
+                    minHeight = 52.dp,
                     modifier = Modifier.weight(0.85f),
                     onClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -551,27 +582,35 @@ fun PlayChestScreen(
             }
         }
 
-        item { Spacer(modifier = Modifier.height(14.dp)) }
+        item { Spacer(modifier = Modifier.height(10.dp)) }
+        }
     }
 }
 
 @Composable
-private fun ModePillButton(
+private fun PlayGameSwitcherPill(
     label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     selected: Boolean,
+    activeColor: Color,
     testTag: String,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .height(38.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(
+            .then(
                 if (selected) {
-                    Brush.horizontalGradient(listOf(StudioTeal, PowderSky))
+                    Modifier.claymorphic(
+                        cornerRadius = 19.dp,
+                        surfaceColor = activeColor,
+                        elevation = 8.dp,
+                        shadowTint = ClayTealShadow,
+                        ledgeDepth = 3.dp
+                    )
                 } else {
-                    Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
+                    Modifier.clip(CircleShape)
                 }
             )
             .clickable(onClick = onClick)
@@ -581,27 +620,85 @@ private fun ModePillButton(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = if (selected) Color(0xFF0A1620) else Color(0xFF9EBAC9),
-                modifier = Modifier.size(16.dp)
+                tint = if (selected) ClayTextCream else ClayDeepTealInk,
+                modifier = Modifier.size(18.dp)
             )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium.copy(
-                    fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold
-                ),
-                color = if (selected) Color(0xFF0A1620) else Color(0xFFB5CBD4)
-            )
+            if (selected) {
+                Text3D(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold),
+                    extrudeColor = Color(0x50174B4F),
+                    depthDp = 1.dp,
+                    maxLines = 1
+                )
+            } else {
+                ClayTextOnLight(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                    textColor = ClayDeepTealInk,
+                    depthDp = 0.6.dp,
+                    maxLines = 1
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun XoxoPlayerCard(
+private fun ClayModePill(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    activeColor: Color,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .height(34.dp)
+            .clip(CircleShape)
+            .background(if (selected) activeColor else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 11.dp)
+            .testTag(testTag),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = if (selected) ClayTextCream else ClayMutedInk,
+                modifier = Modifier.size(15.dp)
+            )
+            if (selected) {
+                Text3D(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold),
+                    extrudeColor = Color(0x45174B4F),
+                    depthDp = 0.8.dp
+                )
+            } else {
+                ClayTextOnLight(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    textColor = ClayMutedInk,
+                    depthDp = 0.5.dp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StudioClayXoxoPlayerTile(
     mark: XoxoMark,
     member: FamilyMemberId,
     profile: UserProfileEntity?,
@@ -610,14 +707,14 @@ private fun XoxoPlayerCard(
     isActiveTurn: Boolean,
     isWinner: Boolean,
     isSelecting: Boolean,
-    accentColor: Color,
+    clayColor: Color,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     val cardScale by animateFloatAsState(
-        targetValue = if (isActiveTurn || isWinner) 1.02f else 0.98f,
-        animationSpec = spring(dampingRatio = 0.65f, stiffness = 360f),
-        label = "player_card_scale_${mark.name}"
+        targetValue = if (isActiveTurn || isWinner) 1.03f else 0.98f,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = 380f),
+        label = "player_tile_scale_${mark.name}"
     )
 
     Box(
@@ -626,26 +723,22 @@ private fun XoxoPlayerCard(
                 scaleX = cardScale
                 scaleY = cardScale
             }
-            .clip(RoundedCornerShape(20.dp))
-            .background(
-                if (isActiveTurn || isWinner) {
-                    accentColor.copy(alpha = 0.18f)
+            .claymorphic(
+                cornerRadius = 22.dp,
+                surfaceColor = clayColor,
+                elevation = if (isActiveTurn || isWinner) 11.dp else 6.dp,
+                shadowTint = ClayTealShadow,
+                ledgeDepth = 4.dp
+            )
+            .then(
+                if (isSelecting || isActiveTurn || isWinner) {
+                    Modifier.border(2.2.dp, ClayHoneyLight, RoundedCornerShape(22.dp))
                 } else {
-                    Color.White.copy(alpha = 0.05f)
+                    Modifier
                 }
             )
-            .border(
-                width = if (isSelecting || isActiveTurn || isWinner) 2.dp else 1.dp,
-                color = when {
-                    isSelecting -> ChampagneGold
-                    isWinner -> ChampagneGold
-                    isActiveTurn -> accentColor
-                    else -> Color.White.copy(alpha = 0.14f)
-                },
-                shape = RoundedCornerShape(20.dp)
-            )
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 10.dp)
+            .padding(start = 10.dp, end = 10.dp, top = 9.dp, bottom = 12.dp)
             .testTag("xoxo_slot_${mark.name.lowercase()}")
     ) {
         Row(
@@ -655,38 +748,31 @@ private fun XoxoPlayerCard(
             FamilyMemberAvatar(
                 member = member,
                 customPhotoUri = profile?.customPhotoUri,
-                size = 42.dp,
+                size = 38.dp,
                 showBadge = false,
                 isOnline = isOnline
             )
             Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Text(
-                        text = mark.name,
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            fontWeight = FontWeight.Black
-                        ),
-                        color = accentColor
-                    )
-                    Text(
-                        text = member.title,
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Text(
-                    text = "$score ${if (score == 1) "win" else "wins"}",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.ExtraBold
+                Text3D(
+                    text = "${mark.name} • ${member.title}",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 11.5.sp
                     ),
-                    color = ChampagneGold
+                    extrudeColor = Color(0x55184B4F),
+                    depthDp = 1.dp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text3D(
+                    text = "$score ${if (score == 1) "win" else "wins"}",
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 13.5.sp
+                    ),
+                    textColor = ClayVanillaLight,
+                    extrudeColor = Color(0x55184B4F),
+                    depthDp = 1.1.dp
                 )
             }
         }
@@ -694,9 +780,8 @@ private fun XoxoPlayerCard(
 }
 
 @Composable
-private fun LuxuryXoxoBoard(
+private fun StudioClayXoxoBoard(
     state: XoxoGameState,
-    activeAccent: Color,
     reducedMotion: Boolean,
     onTapCell: (Int) -> Unit,
     modifier: Modifier = Modifier
@@ -710,30 +795,14 @@ private fun LuxuryXoxoBoard(
     Box(
         modifier = modifier
             .aspectRatio(1f)
-            .shadow(
-                elevation = 24.dp,
-                shape = RoundedCornerShape(34.dp),
-                ambientColor = activeAccent.copy(alpha = 0.4f),
-                spotColor = activeAccent.copy(alpha = 0.45f)
+            .claymorphic(
+                cornerRadius = 34.dp,
+                surfaceColor = ClayPeach,
+                elevation = 18.dp,
+                shadowTint = ClayTealShadow,
+                ledgeDepth = 8.dp
             )
-            .clip(RoundedCornerShape(34.dp))
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(Color(0xFF152D40), LuxuryCabinetTop, LuxuryCabinetBottom)
-                )
-            )
-            .border(
-                width = 2.dp,
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        ChampagneGold.copy(alpha = 0.72f),
-                        Color.White.copy(alpha = 0.18f),
-                        activeAccent.copy(alpha = 0.65f)
-                    )
-                ),
-                shape = RoundedCornerShape(34.dp)
-            )
-            .padding(14.dp)
+            .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 20.dp)
             .testTag("xoxo_game_board")
     ) {
         Column(
@@ -753,7 +822,7 @@ private fun LuxuryXoxoBoard(
                         val isWinningCell = idx in state.winningLine
                         val dimCell = state.winningLine.isNotEmpty() && !isWinningCell
 
-                        LuxuryXoxoCell(
+                        StudioClayXoxoCell(
                             index = idx,
                             mark = markStr,
                             isWinningCell = isWinningCell,
@@ -769,11 +838,10 @@ private fun LuxuryXoxoBoard(
             }
         }
 
-        // Radiant Animated Winning Strike-Through Beam across the 3 winning tiles
+        // Glowing Warm Honey-Cream Winning Beam
         if (state.winningLine.size == 3 && winLineProgress > 0.01f) {
             val startIdx = state.winningLine.first()
             val endIdx = state.winningLine.last()
-            val beamColor = if (state.winnerMark == XoxoMark.X) NeonXPrimary else NeonOPrimary
 
             Canvas(modifier = Modifier.fillMaxSize()) {
                 fun centerOf(index: Int): Offset {
@@ -791,28 +859,18 @@ private fun LuxuryXoxoBoard(
                     y = p1.y + (p2.y - p1.y) * winLineProgress
                 )
 
-                // Outer luminous glow
                 drawLine(
-                    color = beamColor.copy(alpha = 0.45f),
+                    color = ClayHoney.copy(alpha = 0.62f),
                     start = p1,
                     end = currentEnd,
                     strokeWidth = 18.dp.toPx(),
                     cap = StrokeCap.Round
                 )
-                // Champagne gold mid-beam
                 drawLine(
-                    color = ChampagneGold.copy(alpha = 0.92f),
+                    color = ClayTextCream,
                     start = p1,
                     end = currentEnd,
-                    strokeWidth = 8.dp.toPx(),
-                    cap = StrokeCap.Round
-                )
-                // Crisp incandescent white core
-                drawLine(
-                    color = Color.White,
-                    start = p1,
-                    end = currentEnd,
-                    strokeWidth = 3.dp.toPx(),
+                    strokeWidth = 6.dp.toPx(),
                     cap = StrokeCap.Round
                 )
             }
@@ -821,7 +879,7 @@ private fun LuxuryXoxoBoard(
 }
 
 @Composable
-private fun LuxuryXoxoCell(
+private fun StudioClayXoxoCell(
     index: Int,
     mark: String,
     isWinningCell: Boolean,
@@ -841,15 +899,16 @@ private fun LuxuryXoxoCell(
         label = "xoxo_cell_draw_$index"
     )
     val tileScale by animateFloatAsState(
-        targetValue = if (isWinningCell && !reducedMotion) 1.04f else 1f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = 380f),
+        targetValue = if (isWinningCell && !reducedMotion) 1.05f else 1f,
+        animationSpec = spring(dampingRatio = 0.56f, stiffness = 380f),
         label = "xoxo_cell_scale_$index"
     )
 
-    val markGlowColor = when (mark) {
-        "X" -> NeonXGlow
-        "O" -> NeonOGlow
-        else -> Color.Transparent
+    val tileClayColor = when {
+        isWinningCell -> ClayHoney
+        mark == "X" -> ClayCoral
+        mark == "O" -> ClayAqua
+        else -> ClayVanillaLight
     }
 
     Box(
@@ -857,31 +916,14 @@ private fun LuxuryXoxoCell(
             .graphicsLayer {
                 scaleX = tileScale
                 scaleY = tileScale
-                alpha = if (isDimmed) 0.42f else 1f
+                alpha = if (isDimmed) 0.56f else 1f
             }
-            .clip(RoundedCornerShape(22.dp))
-            .background(
-                Brush.verticalGradient(
-                    colors = if (isWinningCell) {
-                        listOf(LuxuryTileWinBg, Color(0xFF13293A))
-                    } else {
-                        listOf(LuxuryTileBg, Color(0xFF0C1A27))
-                    }
-                )
-            )
-            .border(
-                width = if (isWinningCell) 2.dp else 1.2.dp,
-                brush = Brush.verticalGradient(
-                    colors = if (isWinningCell) {
-                        listOf(ChampagneGold, markGlowColor.copy(alpha = 0.8f))
-                    } else {
-                        listOf(
-                            Color.White.copy(alpha = 0.16f),
-                            Color.White.copy(alpha = 0.04f)
-                        )
-                    }
-                ),
-                shape = RoundedCornerShape(22.dp)
+            .claymorphic(
+                cornerRadius = 22.dp,
+                surfaceColor = tileClayColor,
+                elevation = if (isWinningCell) 12.dp else 7.dp,
+                shadowTint = ClayTealShadow,
+                ledgeDepth = 4.5.dp
             )
             .clickable(enabled = mark.isEmpty(), onClick = onClick)
             .testTag("xoxo_cell_$index"),
@@ -889,36 +931,32 @@ private fun LuxuryXoxoCell(
     ) {
         AnimatedVisibility(
             visible = mark.isNotEmpty(),
-            enter = fadeIn(tween(120)) + scaleIn(initialScale = 0.78f, animationSpec = spring(dampingRatio = 0.6f))
+            enter = fadeIn(tween(120)) + scaleIn(initialScale = 0.74f, animationSpec = spring(dampingRatio = 0.56f))
         ) {
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(18.dp)
             ) {
-                val strokeMain = 9.dp.toPx()
-                val strokeGlow = 17.dp.toPx()
-                val strokeCore = 3.dp.toPx()
+                val strokeMain = 11.dp.toPx()
+                val strokeShadow = 13.dp.toPx()
+                val shadowOffset = 2.6.dp.toPx()
 
                 if (mark == "X") {
                     val p1 = (drawProgress * 2f).coerceIn(0f, 1f)
                     val p2 = ((drawProgress - 0.45f) / 0.55f).coerceIn(0f, 1f)
 
-                    // First diagonal (\)
                     if (p1 > 0f) {
                         val s1 = Offset(0f, 0f)
                         val e1 = Offset(size.width * p1, size.height * p1)
-                        drawLine(NeonXGlow.copy(alpha = 0.35f), s1, e1, strokeWidth = strokeGlow, cap = StrokeCap.Round)
-                        drawLine(NeonXPrimary, s1, e1, strokeWidth = strokeMain, cap = StrokeCap.Round)
-                        drawLine(Color(0xFFFFEDE6), s1, e1, strokeWidth = strokeCore, cap = StrokeCap.Round)
+                        drawLine(Color(0x451A484C), s1 + Offset(0f, shadowOffset), e1 + Offset(0f, shadowOffset), strokeWidth = strokeShadow, cap = StrokeCap.Round)
+                        drawLine(ClayTextCream, s1, e1, strokeWidth = strokeMain, cap = StrokeCap.Round)
                     }
-                    // Second diagonal (/)
                     if (p2 > 0f) {
                         val s2 = Offset(size.width, 0f)
                         val e2 = Offset(size.width * (1f - p2), size.height * p2)
-                        drawLine(NeonXGlow.copy(alpha = 0.35f), s2, e2, strokeWidth = strokeGlow, cap = StrokeCap.Round)
-                        drawLine(NeonXPrimary, s2, e2, strokeWidth = strokeMain, cap = StrokeCap.Round)
-                        drawLine(Color(0xFFFFEDE6), s2, e2, strokeWidth = strokeCore, cap = StrokeCap.Round)
+                        drawLine(Color(0x451A484C), s2 + Offset(0f, shadowOffset), e2 + Offset(0f, shadowOffset), strokeWidth = strokeShadow, cap = StrokeCap.Round)
+                        drawLine(ClayTextCream, s2, e2, strokeWidth = strokeMain, cap = StrokeCap.Round)
                     }
                 } else if (mark == "O") {
                     val sweep = 360f * drawProgress
@@ -926,31 +964,22 @@ private fun LuxuryXoxoCell(
                     val arcSize = Size(size.width - strokeMain, size.height - strokeMain)
                     val topLeft = Offset(inset, inset)
                     drawArc(
-                        color = NeonOGlow.copy(alpha = 0.35f),
+                        color = Color(0x451A484C),
                         startAngle = -90f,
                         sweepAngle = sweep,
                         useCenter = false,
-                        topLeft = topLeft,
+                        topLeft = topLeft + Offset(0f, shadowOffset),
                         size = arcSize,
-                        style = Stroke(width = strokeGlow, cap = StrokeCap.Round)
+                        style = Stroke(width = strokeShadow, cap = StrokeCap.Round)
                     )
                     drawArc(
-                        color = NeonOPrimary,
+                        color = ClayTextCream,
                         startAngle = -90f,
                         sweepAngle = sweep,
                         useCenter = false,
                         topLeft = topLeft,
                         size = arcSize,
                         style = Stroke(width = strokeMain, cap = StrokeCap.Round)
-                    )
-                    drawArc(
-                        color = Color(0xFFE0FCFF),
-                        startAngle = -90f,
-                        sweepAngle = sweep,
-                        useCenter = false,
-                        topLeft = topLeft,
-                        size = arcSize,
-                        style = Stroke(width = strokeCore, cap = StrokeCap.Round)
                     )
                 }
             }

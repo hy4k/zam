@@ -222,3 +222,65 @@ DROP POLICY IF EXISTS "family_media_update" ON storage.objects;
 CREATE POLICY "family_media_update" ON storage.objects
     FOR UPDATE USING (bucket_id = 'family-media')
     WITH CHECK (bucket_id = 'family-media');
+
+-- =============================================================================
+-- 8. Secure Username & Password Authentication (family_accounts + verify_family_login RPC)
+--    Passwords are stored ONLY as salted bcrypt hashes via pgcrypto.
+--    Direct client SELECT/INSERT/UPDATE/DELETE is blocked by RLS & REVOKE.
+-- =============================================================================
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS public.family_accounts (
+    member_id TEXT PRIMARY KEY CHECK (member_id IN ('MITHUN', 'MAFITHA', 'ZAYN')),
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    updated_at_ms BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+);
+
+INSERT INTO public.family_accounts (member_id, username, password_hash, display_name)
+VALUES
+    ('ZAYN',    'Zzayn',   crypt('0204', gen_salt('bf')), 'Zayn Adam'),
+    ('MAFITHA', 'mafitha', crypt('4249', gen_salt('bf')), 'Mafitha'),
+    ('MITHUN',  'mithun',  crypt('8509', gen_salt('bf')), 'Mithun')
+ON CONFLICT (member_id) DO UPDATE SET
+    username      = EXCLUDED.username,
+    password_hash = EXCLUDED.password_hash,
+    display_name  = EXCLUDED.display_name,
+    updated_at_ms = (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT;
+
+ALTER TABLE public.family_accounts ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.family_accounts FROM anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.verify_family_login(
+    p_username TEXT,
+    p_password TEXT
+)
+RETURNS TABLE (
+    member_id TEXT,
+    username TEXT,
+    display_name TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+BEGIN
+    IF p_username IS NULL OR p_password IS NULL
+       OR LENGTH(TRIM(p_username)) = 0
+       OR LENGTH(p_password) = 0 THEN
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+    SELECT a.member_id, a.username, a.display_name
+    FROM public.family_accounts AS a
+    WHERE LOWER(a.username) = LOWER(TRIM(p_username))
+      AND a.password_hash = crypt(p_password, a.password_hash)
+    LIMIT 1;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.verify_family_login(TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.verify_family_login(TEXT, TEXT) TO anon, authenticated;
+

@@ -72,7 +72,9 @@ abstract class KinNestDatabase : RoomDatabase() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         super.onCreate(db)
                         CoroutineScope(Dispatchers.IO).launch {
-                            ensureSeeded(appContext, getInstance(appContext).kinNestDao())
+                            runCatching {
+                                ensureSeeded(appContext, getInstance(appContext).kinNestDao())
+                            }
                         }
                     }
                 })

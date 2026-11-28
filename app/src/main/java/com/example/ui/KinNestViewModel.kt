@@ -36,6 +36,7 @@ import com.example.data.model.MemberPresenceStatus
 import com.example.data.model.MessageType
 import com.example.data.model.MomentCategory
 import com.example.data.model.OfflineSyncState
+import com.example.data.model.PresenceAvailability
 import com.example.data.model.UserSessionState
 import com.example.data.model.VoiceLanguage
 import com.example.data.model.XoxoGameState
@@ -47,6 +48,7 @@ import com.example.media.StopRecordingResult
 import com.example.media.VoiceAndMediaCapture
 import com.example.security.DeviceKeystoreManager
 import com.example.security.ParentalAuthManager
+import com.example.sync.FamilyLoginResult
 import com.example.sync.FamilyRealtimeSignal
 import com.example.sync.KinNestSyncRepository
 import com.example.sync.OfflineSyncWorker
@@ -72,18 +74,25 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 
 data class HeartbeatBannerAlert(
     val sender: FamilyMemberId,
     val message: String,
     val isSafetyAlert: Boolean,
     val timestampMs: Long
+)
+
+data class LoginUiState(
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null
 )
 
 class KinNestViewModel(application: Application) : AndroidViewModel(application) {
@@ -119,6 +128,9 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         )
     )
     val session: StateFlow<UserSessionState> = _session.asStateFlow()
+
+    private val _loginUiState = MutableStateFlow(LoginUiState())
+    val loginUiState: StateFlow<LoginUiState> = _loginUiState.asStateFlow()
 
     private val _callState = MutableStateFlow(
         CallState(
@@ -186,11 +198,18 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     private val _dailyComicGenState = MutableStateFlow<DailyComicGenerationState>(DailyComicGenerationState.Idle)
     val dailyComicGenState: StateFlow<DailyComicGenerationState> = _dailyComicGenState.asStateFlow()
 
+    private val _manualPresenceChoice = MutableStateFlow(PresenceAvailability.ONLINE)
+    val manualPresenceChoice: StateFlow<PresenceAvailability> = _manualPresenceChoice.asStateFlow()
+
     private val _memberPresence = MutableStateFlow(
         FamilyMemberId.entries.associateWith { member ->
             MemberPresenceStatus(
                 memberId = member,
-                isOnline = member == initialDeviceOwner && _isOnline.value,
+                availability = if (member == initialDeviceOwner && _isOnline.value) {
+                    PresenceAvailability.ONLINE
+                } else {
+                    PresenceAvailability.OFFLINE
+                },
                 lastSeenMs = if (member == initialDeviceOwner) System.currentTimeMillis() else null
             )
         }
@@ -204,27 +223,36 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     val uiFeedback = _uiFeedback.asSharedFlow()
 
     private var isAppInForeground = true
+    private val lastUserInteractionMs = AtomicLong(System.currentTimeMillis())
     private var callTimerJob: Job? = null
     private var presenceLoopJob: Job? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
-            // Ensure initial family profiles & starter activities exist on first launch
-            if (dao.countProfiles() == 0) {
-                KinNestDatabase.ensureSeeded(appContext, dao)
-            }
-            if (checkCurrentConnectivity()) {
-                flushPendingOfflineMessages()
-                hydrateFromSupabase()
+            runCatching {
+                // Ensure initial family profiles & starter activities exist on first launch
+                if (dao.countProfiles() == 0) {
+                    KinNestDatabase.ensureSeeded(appContext, dao)
+                }
+                if (checkCurrentConnectivity()) {
+                    flushPendingOfflineMessages()
+                    hydrateFromSupabase()
+                }
             }
         }
         registerConnectivityMonitor()
         observeLiveKitDataChannel()
         observeLiveKitRoomState()
+        observeRealtimePresence()
         observeRealtimeSignaling()
         if (_isOnline.value) {
-            realtimeSignaling.connectIfConfigured()
+            val (avail, note) = computeEffectiveSelfPresence()
+            realtimeSignaling.connectIfConfigured(
+                member = initialDeviceOwner,
+                availability = avail,
+                statusNote = note
+            )
         }
         startPresenceLoop()
     }
@@ -300,24 +328,43 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
             _xoxoState.value = remoteXoxo
         }
 
-        // 4. Hydrate Family Online / Last-Seen Presence
+        // 4. Hydrate Family Online / Last-Seen Presence (do not overwrite fresher Realtime Presence Away/Busy!)
         val remotePresence = syncRepo.fetchAllPresence()
         if (remotePresence.isNotEmpty()) {
             val now = System.currentTimeMillis()
             val owner = _session.value.deviceOwner
+            val realtimeLive = realtimeSignaling.realtimePresenceMap.value
             _memberPresence.update { current ->
                 val mutable = current.toMutableMap()
                 remotePresence.forEach { dto ->
                     val member = runCatching { FamilyMemberId.valueOf(dto.member_id) }.getOrNull() ?: return@forEach
                     if (member != owner) {
-                        val freshOnline = dto.is_online && dto.last_seen_ms > 0L && (now - dto.last_seen_ms) <= PRESENCE_TIMEOUT_MS
-                        val existing = mutable[member]
-                        val bestLastSeen = maxOf(dto.last_seen_ms, existing?.lastSeenMs ?: 0L).takeIf { it > 0L }
-                        mutable[member] = MemberPresenceStatus(
-                            memberId = member,
-                            isOnline = freshOnline || (existing?.isOnline == true && existing.lastSeenMs != null && (now - existing.lastSeenMs) <= PRESENCE_TIMEOUT_MS),
-                            lastSeenMs = bestLastSeen
-                        )
+                        val rtEntry = realtimeLive[member]
+                        if (rtEntry != null) {
+                            mutable[member] = MemberPresenceStatus(
+                                memberId = member,
+                                availability = rtEntry.availability,
+                                statusNote = rtEntry.statusNote,
+                                lastSeenMs = maxOf(rtEntry.updatedAtMs, dto.last_seen_ms)
+                            )
+                        } else {
+                            val freshOnline = dto.is_online && dto.last_seen_ms > 0L && (now - dto.last_seen_ms) <= PRESENCE_TIMEOUT_MS
+                            val existing = mutable[member]
+                            val bestLastSeen = maxOf(dto.last_seen_ms, existing?.lastSeenMs ?: 0L).takeIf { it > 0L }
+                            val keepExistingAvailability = existing != null && existing.isOnline &&
+                                existing.lastSeenMs != null && (now - existing.lastSeenMs) <= PRESENCE_TIMEOUT_MS
+                            val resolvedAvailability = when {
+                                keepExistingAvailability -> existing!!.availability
+                                freshOnline -> PresenceAvailability.ONLINE
+                                else -> PresenceAvailability.OFFLINE
+                            }
+                            mutable[member] = MemberPresenceStatus(
+                                memberId = member,
+                                availability = resolvedAvailability,
+                                statusNote = if (keepExistingAvailability) existing?.statusNote else null,
+                                lastSeenMs = bestLastSeen
+                            )
+                        }
                     }
                 }
                 mutable
@@ -368,30 +415,33 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun checkCurrentConnectivity(): Boolean {
-        val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = cm.activeNetwork ?: return false
-        val caps = cm.getNetworkCapabilities(network) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+    private fun checkCurrentConnectivity(): Boolean = runCatching {
+        val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return@runCatching false
+        val network = cm.activeNetwork ?: return@runCatching false
+        val caps = cm.getNetworkCapabilities(network) ?: return@runCatching false
+        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
             (
                 caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
                     caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
                     caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ||
                     caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
                 )
-    }
+    }.getOrDefault(false)
 
     private fun registerConnectivityMonitor() {
         val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 _isOnline.value = true
-                updateSelfPresence(online = isAppInForeground)
-                if (isAppInForeground) {
-                    realtimeSignaling.connectIfConfigured()
-                    _session.value.deviceOwner?.let { owner ->
-                        realtimeSignaling.broadcastPresencePing(owner, isHello = true)
-                    }
+                publishSelfPresenceNow(isHello = true)
+                if (isAppInForeground || isCallInProgress()) {
+                    val (avail, note) = computeEffectiveSelfPresence()
+                    realtimeSignaling.connectIfConfigured(
+                        member = _session.value.deviceOwner,
+                        availability = avail,
+                        statusNote = note
+                    )
                 }
                 triggerSyncNow(expedited = false)
             }
@@ -401,9 +451,14 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                 val currentlyOnline = hasInternet || checkCurrentConnectivity()
                 if (_isOnline.value != currentlyOnline) {
                     _isOnline.value = currentlyOnline
-                    updateSelfPresence(online = currentlyOnline && isAppInForeground)
-                    if (currentlyOnline && isAppInForeground) {
-                        realtimeSignaling.connectIfConfigured()
+                    publishSelfPresenceNow(isHello = currentlyOnline)
+                    if (currentlyOnline && (isAppInForeground || isCallInProgress())) {
+                        val (avail, note) = computeEffectiveSelfPresence()
+                        realtimeSignaling.connectIfConfigured(
+                            member = _session.value.deviceOwner,
+                            availability = avail,
+                            statusNote = note
+                        )
                         triggerSyncNow(expedited = false)
                     }
                 }
@@ -414,7 +469,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                 val stillConnected = checkCurrentConnectivity()
                 _isOnline.value = stillConnected
                 if (!stillConnected) {
-                    updateSelfPresence(online = false)
+                    updateSelfPresence(PresenceAvailability.OFFLINE, null)
                     realtimeSignaling.disconnect()
                 }
             }
@@ -486,47 +541,114 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
             }
         }
         viewModelScope.launch {
+            liveKitEngine.isReconnecting.collect { reconnecting ->
+                _callState.update { state ->
+                    when {
+                        reconnecting && state.phase is CallPhase.Active ->
+                            state.copy(phase = CallPhase.Reconnecting("Reconnecting call…"))
+                        !reconnecting && state.phase is CallPhase.Reconnecting ->
+                            state.copy(phase = CallPhase.Active)
+                        else -> state
+                    }
+                }
+            }
+        }
+        viewModelScope.launch {
             combine(
                 liveKitEngine.connectedLiveMembers,
                 liveKitEngine.speakingMembers,
                 liveKitEngine.videoTracksByMember,
+                liveKitEngine.mutedMembers,
                 liveKitEngine.isLiveStreamActive
-            ) { connected, speaking, tracks, liveActive ->
-                Triple(connected, speaking, Pair(tracks, liveActive))
-            }.collect { (connected, speaking, pair) ->
-                val (tracks, liveActive) = pair
-                if (!liveActive) return@collect
+            ) { connected, speaking, tracks, muted, liveActive ->
+                LiveKitRoomSnapshot(connected, speaking, tracks, muted, liveActive)
+            }.collect { snap ->
+                if (!snap.liveActive) return@collect
+                val self = _session.value.activeMember ?: FamilyMemberId.MITHUN
                 _callState.update { state ->
-                    if (state.phase !is CallPhase.Active && state.phase !is CallPhase.DialingOutgoing) {
+                    if (state.phase !is CallPhase.Active &&
+                        state.phase !is CallPhase.DialingOutgoing &&
+                        state.phase !is CallPhase.Reconnecting
+                    ) {
                         return@update state
                     }
                     val existingMap = state.participants.associateBy { it.memberId }.toMutableMap()
-                    connected.forEach { memberId ->
-                        val prev = existingMap[memberId]
-                        val isSpk = memberId in speaking
-                        val hasCam = tracks.containsKey(memberId)
-                        existingMap[memberId] = (prev ?: CallParticipantState(
-                            memberId = memberId,
-                            isConnected = true,
-                            isSpeaking = isSpk
-                        )).copy(
-                            isConnected = true,
-                            isSpeaking = isSpk,
-                            audioLevel = if (isSpk) 0.85f else 0.14f,
-                            isCameraEnabled = if (memberId == _session.value.activeMember) {
-                                state.isLocalCameraOn
-                            } else {
-                                hasCam
-                            }
+                    // Update any already-listed participants (including disconnects!)
+                    existingMap.keys.toList().forEach { memberId ->
+                        val prev = existingMap[memberId] ?: return@forEach
+                        val isConn = memberId in snap.connected || memberId == self
+                        val isSpk = memberId in snap.speaking
+                        val isMutedNow = if (memberId == self) state.isLocalMicMuted else (memberId in snap.muted)
+                        val hasCam = if (memberId == self) state.isLocalCameraOn else snap.tracks.containsKey(memberId)
+                        existingMap[memberId] = prev.copy(
+                            isConnected = isConn,
+                            isSpeaking = isSpk && !isMutedNow,
+                            audioLevel = if (isMutedNow || !isConn) 0f else if (isSpk) 0.85f else 0.14f,
+                            isMuted = isMutedNow,
+                            isCameraEnabled = hasCam
                         )
                     }
-                    // Keep invited members visible while waiting for them to join
+                    // Add any newly joined remote family members
+                    snap.connected.forEach { memberId ->
+                        if (!existingMap.containsKey(memberId)) {
+                            val isSpk = memberId in snap.speaking
+                            val isMutedNow = memberId in snap.muted
+                            existingMap[memberId] = CallParticipantState(
+                                memberId = memberId,
+                                isConnected = true,
+                                isSpeaking = isSpk && !isMutedNow,
+                                audioLevel = if (isMutedNow) 0f else if (isSpk) 0.85f else 0.14f,
+                                isMuted = isMutedNow,
+                                isCameraEnabled = snap.tracks.containsKey(memberId)
+                            )
+                        }
+                    }
                     val ordered = existingMap.values.sortedBy { p ->
-                        if (p.memberId == _session.value.activeMember) 0
-                        else if (p.memberId in connected) 1
-                        else 2
+                        when {
+                            p.memberId == self -> 0
+                            p.isConnected -> 1
+                            else -> 2
+                        }
                     }
                     state.copy(participants = ordered)
+                }
+            }
+        }
+    }
+
+    private fun observeRealtimePresence() {
+        viewModelScope.launch {
+            realtimeSignaling.realtimePresenceMap.collect { presenceMap ->
+                val owner = _session.value.deviceOwner
+                val now = System.currentTimeMillis()
+                _memberPresence.update { current ->
+                    FamilyMemberId.entries.associateWith { member ->
+                        if (member == owner) {
+                            current[member] ?: MemberPresenceStatus(member)
+                        } else {
+                            val rt = presenceMap[member]
+                            if (rt != null) {
+                                MemberPresenceStatus(
+                                    memberId = member,
+                                    availability = rt.availability,
+                                    statusNote = rt.statusNote,
+                                    lastSeenMs = maxOf(rt.updatedAtMs, now)
+                                )
+                            } else {
+                                // Only mark offline if no fresh broadcast ping was heard very recently
+                                val prev = current[member] ?: MemberPresenceStatus(member)
+                                val heardRecently = prev.lastSeenMs != null && (now - prev.lastSeenMs) < PRESENCE_TIMEOUT_MS
+                                if (heardRecently && prev.isOnline) {
+                                    prev
+                                } else {
+                                    prev.copy(
+                                        availability = PresenceAvailability.OFFLINE,
+                                        statusNote = null
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -541,19 +663,39 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                 if (self != null && sender == self) return@collect
 
                 val nowMs = System.currentTimeMillis()
-                // Any live signal from another family member proves they are online right now
+                // Any live non-offline signal from another family member updates their live presence
                 if (signal.kind != SupabaseRealtimeSignaling.KIND_PRESENCE_OFFLINE) {
-                    markRemoteMemberOnline(sender, nowMs)
+                    val parsedAvail = signal.presenceStatus.takeIf { it.isNotBlank() }?.let {
+                        runCatching { PresenceAvailability.valueOf(it) }.getOrNull()
+                    }
+                    val currentExisting = _memberPresence.value[sender]
+                    val resolvedAvail = parsedAvail
+                        ?: currentExisting?.availability?.takeIf { it != PresenceAvailability.OFFLINE }
+                        ?: PresenceAvailability.ONLINE
+                    val resolvedNote = signal.statusNote.takeIf { it.isNotBlank() }
+                        ?: if (parsedAvail == null) currentExisting?.statusNote else null
+                    updateRemoteMemberPresence(sender, resolvedAvail, resolvedNote, nowMs)
                 }
 
                 when (signal.kind) {
                     SupabaseRealtimeSignaling.KIND_PRESENCE_PING -> {
-                        if (signal.text == "HELLO" && self != null && isAppInForeground && _isOnline.value) {
-                            realtimeSignaling.broadcastPresencePing(self, isHello = false)
+                        if (signal.text == "HELLO" && self != null && (isAppInForeground || isCallInProgress()) && _isOnline.value) {
+                            val (avail, note) = computeEffectiveSelfPresence()
+                            realtimeSignaling.trackPresence(
+                                member = self,
+                                availability = avail,
+                                statusNote = note,
+                                isHello = false
+                            )
                         }
                     }
                     SupabaseRealtimeSignaling.KIND_PRESENCE_OFFLINE -> {
-                        markRemoteMemberOffline(sender, signal.timestampMs.takeIf { it > 0L } ?: nowMs)
+                        updateRemoteMemberPresence(
+                            member = sender,
+                            availability = PresenceAvailability.OFFLINE,
+                            statusNote = null,
+                            timestampMs = signal.timestampMs.takeIf { it > 0L } ?: nowMs
+                        )
                     }
                     SupabaseRealtimeSignaling.KIND_CALL_INVITE -> {
                         val targets = signal.targetIdsCsv.split(",").map { it.trim() }
@@ -562,18 +704,43 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                             telecomManager.postLockScreenIncomingCallNotification(
                                 caller = sender,
                                 isThreeWay = signal.isThreeWay,
+                                videoEnabled = signal.videoEnabled,
                                 quietHoursActive = _session.value.quietHoursEnabled
                             )
                             _callState.update {
                                 it.copy(
                                     roomName = signal.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM },
+                                    isVoiceCallMode = !signal.videoEnabled,
+                                    isLocalCameraOn = signal.videoEnabled,
                                     phase = CallPhase.RingingIncoming(
                                         caller = sender,
                                         isThreeWay = signal.isThreeWay,
-                                        roomName = signal.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM }
+                                        roomName = signal.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM },
+                                        videoEnabled = signal.videoEnabled
                                     )
                                 )
                             }
+                        }
+                    }
+                    SupabaseRealtimeSignaling.KIND_CALL_DECLINE -> {
+                        val currentPhase = _callState.value.phase
+                        val sameRoom = signal.roomName.isBlank() || signal.roomName == _callState.value.roomName
+                        if (sameRoom && (currentPhase is CallPhase.DialingOutgoing || currentPhase is CallPhase.Active)) {
+                            _uiFeedback.tryEmit("${sender.displayName} couldn't answer right now")
+                            val otherRemoteConnected = liveKitEngine.connectedLiveMembers.value
+                                .any { it != self && it != sender }
+                            val isSoloCallToDecliner = _callState.value.participants.size <= 2
+                            if (!otherRemoteConnected && isSoloCallToDecliner) {
+                                endCallInternal("${sender.displayName} declined the call", notifyRemote = false)
+                            }
+                        }
+                    }
+                    SupabaseRealtimeSignaling.KIND_CALL_END -> {
+                        val ringing = _callState.value.phase as? CallPhase.RingingIncoming
+                        if (ringing != null && ringing.caller == sender) {
+                            telecomManager.cancelIncomingCallNotification()
+                            _callState.update { it.copy(phase = CallPhase.Idle) }
+                            _uiFeedback.tryEmit("${sender.displayName} cancelled the call")
                         }
                     }
                     SupabaseRealtimeSignaling.KIND_HEARTBEAT -> {
@@ -688,37 +855,133 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private fun isCallInProgress(): Boolean {
+        val p = _callState.value.phase
+        return p !is CallPhase.Idle && p !is CallPhase.Ended
+    }
+
+    private fun computeEffectiveSelfPresence(): Pair<PresenceAvailability, String?> {
+        if (!_isOnline.value) return PresenceAvailability.OFFLINE to null
+        if (isCallInProgress()) {
+            val label = if (_callState.value.isVoiceCallMode) "Voice call" else "Video call"
+            return PresenceAvailability.BUSY to label
+        }
+        if (_isWalkieRecording.value) {
+            return PresenceAvailability.BUSY to "On radio"
+        }
+        if (!isAppInForeground) {
+            return PresenceAvailability.AWAY to "Away"
+        }
+        val manual = _manualPresenceChoice.value
+        if (manual == PresenceAvailability.BUSY) return PresenceAvailability.BUSY to "Busy"
+        if (manual == PresenceAvailability.AWAY) return PresenceAvailability.AWAY to "Away"
+        val idleMs = System.currentTimeMillis() - lastUserInteractionMs.get()
+        if (idleMs >= IDLE_AWAY_TIMEOUT_MS) {
+            return PresenceAvailability.AWAY to "Away"
+        }
+        return PresenceAvailability.ONLINE to null
+    }
+
+    fun setMyPresenceAvailability(availability: PresenceAvailability) {
+        if (availability == PresenceAvailability.OFFLINE) return
+        lastUserInteractionMs.set(System.currentTimeMillis())
+        _manualPresenceChoice.value = availability
+        publishSelfPresenceNow(isHello = false)
+        _uiFeedback.tryEmit("Status set to ${availability.label}")
+    }
+
+    fun cycleMyPresenceAvailability() {
+        val next = when (_manualPresenceChoice.value) {
+            PresenceAvailability.ONLINE -> PresenceAvailability.AWAY
+            PresenceAvailability.AWAY -> PresenceAvailability.BUSY
+            else -> PresenceAvailability.ONLINE
+        }
+        setMyPresenceAvailability(next)
+    }
+
+    fun recordUserInteraction() {
+        val wasAutoAway = _manualPresenceChoice.value == PresenceAvailability.ONLINE &&
+            (System.currentTimeMillis() - lastUserInteractionMs.get()) >= IDLE_AWAY_TIMEOUT_MS
+        lastUserInteractionMs.set(System.currentTimeMillis())
+        if (wasAutoAway) {
+            publishSelfPresenceNow(isHello = false)
+        }
+    }
+
+    private fun publishSelfPresenceNow(isHello: Boolean = false) {
+        val owner = _session.value.deviceOwner ?: return
+        val (avail, note) = computeEffectiveSelfPresence()
+        updateSelfPresence(avail, note)
+        if (_isOnline.value && (isAppInForeground || isCallInProgress())) {
+            realtimeSignaling.trackPresence(
+                member = owner,
+                availability = avail,
+                statusNote = note,
+                isHello = isHello
+            )
+            val now = System.currentTimeMillis()
+            viewModelScope.launch(Dispatchers.IO) {
+                syncRepo.upsertPresence(owner, isOnline = avail != PresenceAvailability.OFFLINE, nowMs = now)
+            }
+        }
+    }
+
     private fun startPresenceLoop() {
         presenceLoopJob?.cancel()
         presenceLoopJob = viewModelScope.launch {
             var firstPing = true
             while (true) {
-                val onlineNow = checkCurrentConnectivity()
-                if (_isOnline.value != onlineNow) {
-                    _isOnline.value = onlineNow
-                }
-                val owner = _session.value.deviceOwner
-                val now = System.currentTimeMillis()
-                if (owner != null && isAppInForeground && onlineNow) {
-                    updateSelfPresence(online = true)
-                    realtimeSignaling.broadcastPresencePing(owner, isHello = firstPing)
-                    viewModelScope.launch(Dispatchers.IO) {
-                        syncRepo.upsertPresence(owner, isOnline = true, nowMs = now)
+                runCatching {
+                    val onlineNow = checkCurrentConnectivity()
+                    if (_isOnline.value != onlineNow) {
+                        _isOnline.value = onlineNow
                     }
-                    firstPing = false
-                }
-                // Expire stale remote online flags after 30 seconds without a ping
-                _memberPresence.update { current ->
-                    current.mapValues { (member, status) ->
-                        if (member == owner) {
-                            status.copy(
-                                isOnline = isAppInForeground && onlineNow,
-                                lastSeenMs = if (isAppInForeground && onlineNow) now else status.lastSeenMs
-                            )
-                        } else if (status.isOnline && status.lastSeenMs != null && (now - status.lastSeenMs) > PRESENCE_TIMEOUT_MS) {
-                            status.copy(isOnline = false)
-                        } else {
-                            status
+                    val owner = _session.value.deviceOwner
+                    val now = System.currentTimeMillis()
+                    val (selfAvail, selfNote) = computeEffectiveSelfPresence()
+                    if (owner != null && (isAppInForeground || isCallInProgress()) && onlineNow) {
+                        updateSelfPresence(selfAvail, selfNote)
+                        realtimeSignaling.trackPresence(
+                            member = owner,
+                            availability = selfAvail,
+                            statusNote = selfNote,
+                            isHello = firstPing
+                        )
+                        viewModelScope.launch(Dispatchers.IO) {
+                            runCatching {
+                                syncRepo.upsertPresence(owner, isOnline = true, nowMs = now)
+                            }
+                        }
+                        firstPing = false
+                    }
+                    // Keep Realtime Presence authoritative; expire stale broadcast-only pings after 35s
+                    val rtLive = realtimeSignaling.realtimePresenceMap.value
+                    _memberPresence.update { current ->
+                        current.mapValues { (member, status) ->
+                            if (member == owner) {
+                                status.copy(
+                                    availability = if ((isAppInForeground || isCallInProgress()) && onlineNow) {
+                                        selfAvail
+                                    } else if (onlineNow) {
+                                        PresenceAvailability.AWAY
+                                    } else {
+                                        PresenceAvailability.OFFLINE
+                                    },
+                                    statusNote = selfNote,
+                                    lastSeenMs = if (onlineNow) now else status.lastSeenMs
+                                )
+                            } else if (rtLive.containsKey(member)) {
+                                val entry = rtLive[member]!!
+                                status.copy(
+                                    availability = entry.availability,
+                                    statusNote = entry.statusNote,
+                                    lastSeenMs = now
+                                )
+                            } else if (status.isOnline && status.lastSeenMs != null && (now - status.lastSeenMs) > PRESENCE_TIMEOUT_MS) {
+                                status.copy(availability = PresenceAvailability.OFFLINE, statusNote = null)
+                            } else {
+                                status
+                            }
                         }
                     }
                 }
@@ -727,33 +990,30 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun updateSelfPresence(online: Boolean) {
+    private fun updateSelfPresence(availability: PresenceAvailability, note: String?) {
         val owner = _session.value.deviceOwner ?: return
         val now = System.currentTimeMillis()
         _memberPresence.update { current ->
             val prev = current[owner] ?: MemberPresenceStatus(owner)
             current + (owner to prev.copy(
-                isOnline = online,
-                lastSeenMs = if (online) now else (prev.lastSeenMs ?: now)
+                availability = availability,
+                statusNote = note,
+                lastSeenMs = if (availability != PresenceAvailability.OFFLINE) now else (prev.lastSeenMs ?: now)
             ))
         }
     }
 
-    private fun markRemoteMemberOnline(member: FamilyMemberId, timestampMs: Long) {
+    private fun updateRemoteMemberPresence(
+        member: FamilyMemberId,
+        availability: PresenceAvailability,
+        statusNote: String?,
+        timestampMs: Long
+    ) {
         _memberPresence.update { current ->
             current + (member to MemberPresenceStatus(
                 memberId = member,
-                isOnline = true,
-                lastSeenMs = timestampMs
-            ))
-        }
-    }
-
-    private fun markRemoteMemberOffline(member: FamilyMemberId, timestampMs: Long) {
-        _memberPresence.update { current ->
-            current + (member to MemberPresenceStatus(
-                memberId = member,
-                isOnline = false,
+                availability = availability,
+                statusNote = statusNote,
                 lastSeenMs = timestampMs
             ))
         }
@@ -761,23 +1021,31 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
 
     fun onAppForegrounded() {
         isAppInForeground = true
+        lastUserInteractionMs.set(System.currentTimeMillis())
         val onlineNow = checkCurrentConnectivity()
         _isOnline.value = onlineNow
         val owner = _session.value.deviceOwner
+        val (avail, note) = computeEffectiveSelfPresence()
         if (owner != null) {
-            updateSelfPresence(online = onlineNow)
+            updateSelfPresence(avail, note)
         }
         if (onlineNow) {
-            realtimeSignaling.connectIfConfigured()
+            realtimeSignaling.connectIfConfigured(
+                member = owner,
+                availability = avail,
+                statusNote = note
+            )
             if (owner != null) {
-                realtimeSignaling.broadcastPresencePing(owner, isHello = true)
+                realtimeSignaling.trackPresence(owner, avail, note, isHello = true)
             }
             viewModelScope.launch(Dispatchers.IO) {
-                if (owner != null) {
-                    syncRepo.upsertPresence(owner, isOnline = true, nowMs = System.currentTimeMillis())
+                runCatching {
+                    if (owner != null) {
+                        syncRepo.upsertPresence(owner, isOnline = true, nowMs = System.currentTimeMillis())
+                    }
+                    flushPendingOfflineMessages()
+                    hydrateFromSupabase()
                 }
-                flushPendingOfflineMessages()
-                hydrateFromSupabase()
             }
         }
     }
@@ -785,17 +1053,110 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     fun onAppBackgrounded() {
         isAppInForeground = false
         val owner = _session.value.deviceOwner
+        // Keep Realtime & Busy presence active if the family is currently in a live video/voice call
+        if (isCallInProgress()) {
+            publishSelfPresenceNow(isHello = false)
+            return
+        }
         if (owner != null) {
-            updateSelfPresence(online = false)
+            updateSelfPresence(PresenceAvailability.AWAY, "Away")
             viewModelScope.launch(Dispatchers.IO) {
-                syncRepo.upsertPresence(owner, isOnline = false, nowMs = System.currentTimeMillis())
+                runCatching {
+                    syncRepo.upsertPresence(owner, isOnline = false, nowMs = System.currentTimeMillis())
+                }
             }
         }
-        // Cleanly close Realtime WebSocket while backgrounded so Android does not abort an idle socket
-        realtimeSignaling.disconnectGracefully(offlineMember = owner)
+        // Cleanly broadcast Away and close Realtime WebSocket before Android suspends idle sockets
+        realtimeSignaling.disconnectGracefully(
+            offlineMember = owner,
+            finalAvailability = PresenceAvailability.AWAY
+        )
     }
 
-    // --- Equipment-Assigned Phone Ownership (No passwords, no accidental switching) ---
+    // --- Supabase Username & Password Authentication ---
+
+    fun clearLoginError() {
+        if (_loginUiState.value.errorMessage != null) {
+            _loginUiState.update { it.copy(errorMessage = null) }
+        }
+    }
+
+    fun loginWithCredentials(
+        username: String,
+        password: String,
+        onLoginSuccess: () -> Unit
+    ) {
+        val cleanUser = username.trim()
+        if (cleanUser.isEmpty()) {
+            _loginUiState.value = LoginUiState(isLoading = false, errorMessage = "Please enter your username.")
+            return
+        }
+        if (password.isEmpty()) {
+            _loginUiState.value = LoginUiState(isLoading = false, errorMessage = "Please enter your password.")
+            return
+        }
+        if (!checkCurrentConnectivity()) {
+            _loginUiState.value = LoginUiState(
+                isLoading = false,
+                errorMessage = "No internet connection. Connect to sign in."
+            )
+            return
+        }
+        if (_loginUiState.value.isLoading) return
+
+        _loginUiState.value = LoginUiState(isLoading = true, errorMessage = null)
+        viewModelScope.launch {
+            when (val result = syncRepo.verifyFamilyLogin(cleanUser, password)) {
+                is FamilyLoginResult.Success -> {
+                    assignThisDeviceToMember(result.member)
+                    _loginUiState.value = LoginUiState(isLoading = false, errorMessage = null)
+                    withContext(Dispatchers.Main) {
+                        onLoginSuccess()
+                    }
+                }
+                is FamilyLoginResult.Failure -> {
+                    _loginUiState.value = LoginUiState(
+                        isLoading = false,
+                        errorMessage = result.reason
+                    )
+                }
+            }
+        }
+    }
+
+    fun signOut() {
+        val previousOwner = _session.value.deviceOwner
+        val now = System.currentTimeMillis()
+        if (previousOwner != null) {
+            realtimeSignaling.broadcastPresenceOffline(previousOwner)
+            viewModelScope.launch(Dispatchers.IO) {
+                syncRepo.upsertPresence(previousOwner, isOnline = false, nowMs = now)
+            }
+        }
+        devicePrefs.edit().remove(KEY_ASSIGNED_MEMBER).apply()
+        _session.update {
+            it.copy(
+                deviceOwner = null,
+                activeMember = null,
+                isAuthenticated = false,
+                isParentalUnlocked = false
+            )
+        }
+        _memberPresence.update { current ->
+            if (previousOwner != null) {
+                current + (previousOwner to MemberPresenceStatus(
+                    memberId = previousOwner,
+                    availability = PresenceAvailability.OFFLINE,
+                    lastSeenMs = now
+                ))
+            } else {
+                current
+            }
+        }
+        _manualPresenceChoice.value = PresenceAvailability.ONLINE
+        _loginUiState.value = LoginUiState()
+        _uiFeedback.tryEmit("Signed out of Holy Moly !")
+    }
 
     fun assignThisDeviceToMember(member: FamilyMemberId) {
         val previousOwner = _session.value.deviceOwner
@@ -816,19 +1177,34 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                 isParentalUnlocked = false
             )
         }
+        _manualPresenceChoice.value = PresenceAvailability.ONLINE
+        lastUserInteractionMs.set(System.currentTimeMillis())
         val now = System.currentTimeMillis()
         _memberPresence.update { current ->
             current.mapValues { (id, status) ->
                 when (id) {
-                    member -> MemberPresenceStatus(id, isOnline = _isOnline.value, lastSeenMs = now)
-                    previousOwner -> status.copy(isOnline = false)
+                    member -> MemberPresenceStatus(
+                        memberId = id,
+                        availability = if (_isOnline.value) PresenceAvailability.ONLINE else PresenceAvailability.OFFLINE,
+                        lastSeenMs = now
+                    )
+                    previousOwner -> status.copy(availability = PresenceAvailability.OFFLINE, statusNote = null)
                     else -> status
                 }
             }
         }
         if (_isOnline.value) {
-            realtimeSignaling.connectIfConfigured()
-            realtimeSignaling.broadcastPresencePing(member, isHello = true)
+            realtimeSignaling.connectIfConfigured(
+                member = member,
+                availability = PresenceAvailability.ONLINE,
+                statusNote = null
+            )
+            realtimeSignaling.trackPresence(
+                member = member,
+                availability = PresenceAvailability.ONLINE,
+                statusNote = null,
+                isHello = true
+            )
             viewModelScope.launch(Dispatchers.IO) {
                 if (previousOwner != null && previousOwner != member) {
                     syncRepo.upsertPresence(previousOwner, isOnline = false, nowMs = now)
@@ -837,10 +1213,10 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                 hydrateFromSupabase()
             }
         }
-        _uiFeedback.tryEmit("This phone is now set to ${member.displayName} (${member.title})!")
+        _uiFeedback.tryEmit("Welcome back, ${member.displayName}!")
         if (member == FamilyMemberId.ZAYN) {
             speakHelper(
-                english = "Hi Zayn Adam! Welcome to A 12 E.",
+                english = "Hi Zayn Adam! Welcome to Holy Moly.",
                 malayalam = "ഹായ് സെയ്ൻ ആദം! സ്വാഗതം."
             )
         }
@@ -851,14 +1227,13 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun signInWithDeviceBoundAvatar(member: FamilyMemberId): Boolean {
-        // Always bind the device only if unassigned; otherwise preserve the phone's assigned owner
         val currentOwner = _session.value.deviceOwner
         if (currentOwner == null) {
             assignThisDeviceToMember(member)
             return true
         }
         if (currentOwner != member) {
-            _uiFeedback.tryEmit("This phone belongs to ${currentOwner.displayName} (${currentOwner.title}).")
+            _uiFeedback.tryEmit("Signed in as ${currentOwner.displayName} (${currentOwner.title}).")
             return false
         }
         return true
@@ -981,10 +1356,15 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
 
     // --- Real-Time 3-Way Video & Voice Engine (LiveKit + Core-Telecom + Supabase Signaling) ---
 
-    fun startFamilyCall(targets: List<FamilyMemberId>) {
+    fun startFamilyCall(targets: List<FamilyMemberId>, videoEnabled: Boolean = true) {
+        recordUserInteraction()
         val self = _session.value.activeMember ?: FamilyMemberId.MITHUN
-        val roomName = LiveKitCallEngine.DEFAULT_FAMILY_ROOM
         val allInRoom = (listOf(self) + targets).distinct()
+        val roomName = if (allInRoom.size >= 3) {
+            LiveKitCallEngine.DEFAULT_FAMILY_ROOM
+        } else {
+            "holymoly-1on1-${allInRoom.map { it.name.lowercase() }.sorted().joinToString("-")}"
+        }
         val participantStates = allInRoom.map { member ->
             CallParticipantState(
                 memberId = member,
@@ -992,7 +1372,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                 isSpeaking = false,
                 audioLevel = if (member == self) 0.25f else 0f,
                 isMuted = false,
-                isCameraEnabled = member == self,
+                isCameraEnabled = member == self && videoEnabled,
                 activeFilter = if (member == self) _callState.value.activeFilter else ArFilterType.NONE
             )
         }
@@ -1000,76 +1380,120 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         _callState.update {
             it.copy(
                 roomName = roomName,
-                phase = CallPhase.DialingOutgoing(targets),
+                phase = CallPhase.DialingOutgoing(targets, videoEnabled = videoEnabled),
                 participants = participantStates,
+                isLocalMicMuted = false,
+                isLocalCameraOn = videoEnabled,
+                isVoiceCallMode = !videoEnabled,
+                isFrontCamera = true,
                 durationSeconds = 0L,
-                networkQualityLabel = "Connecting your call…"
+                showLiveDrawingOverlay = false,
+                networkQualityLabel = if (videoEnabled) "Connecting video call…" else "Connecting voice call…"
             )
         }
+        // Immediately show Busy ("Video call" / "Voice call") on Supabase Realtime Presence
+        publishSelfPresenceNow(isHello = false)
 
         // Ring other family devices immediately over Supabase Realtime Broadcast
         realtimeSignaling.broadcastCallInvite(
             caller = self,
             targets = targets.filter { it != self },
             roomName = roomName,
-            isThreeWay = allInRoom.size >= 3
+            isThreeWay = allInRoom.size >= 3,
+            videoEnabled = videoEnabled
         )
 
-        val primaryTarget = targets.firstOrNull() ?: FamilyMemberId.MAFITHA
+        val primaryTarget = targets.firstOrNull { it != self } ?: targets.firstOrNull() ?: FamilyMemberId.MAFITHA
         telecomManager.startManagedFamilyCall(
             callerOrTarget = primaryTarget,
             isIncoming = false,
-            isVideo = true,
-            onAnswered = { connectCallMedia(allInRoom, roomName) },
-            onDisconnected = { endCallInternal("Call ended") }
+            isVideo = videoEnabled,
+            onAnswered = { connectCallMedia(allInRoom, roomName, videoEnabled) },
+            onDisconnected = { endCallInternal("Call ended", notifyRemote = true) }
         )
 
         viewModelScope.launch {
-            delay(450)
+            delay(350)
             if (_callState.value.phase is CallPhase.DialingOutgoing) {
-                connectCallMedia(allInRoom, roomName)
+                connectCallMedia(allInRoom, roomName, videoEnabled)
             }
         }
     }
 
-    fun simulateIncomingCall(caller: FamilyMemberId, isThreeWay: Boolean) {
+    fun simulateIncomingCall(
+        caller: FamilyMemberId,
+        isThreeWay: Boolean,
+        videoEnabled: Boolean = true
+    ) {
         telecomManager.postLockScreenIncomingCallNotification(
             caller = caller,
             isThreeWay = isThreeWay,
+            videoEnabled = videoEnabled,
             quietHoursActive = _session.value.quietHoursEnabled
         )
         _callState.update {
             it.copy(
                 roomName = LiveKitCallEngine.DEFAULT_FAMILY_ROOM,
+                isVoiceCallMode = !videoEnabled,
+                isLocalCameraOn = videoEnabled,
                 phase = CallPhase.RingingIncoming(
                     caller = caller,
                     isThreeWay = isThreeWay,
-                    roomName = LiveKitCallEngine.DEFAULT_FAMILY_ROOM
+                    roomName = LiveKitCallEngine.DEFAULT_FAMILY_ROOM,
+                    videoEnabled = videoEnabled
                 )
             )
         }
     }
 
-    fun acceptIncomingCall() {
+    fun acceptIncomingCall(joinWithVideo: Boolean? = null) {
+        recordUserInteraction()
         val incoming = _callState.value.phase as? CallPhase.RingingIncoming ?: return
         val self = _session.value.activeMember ?: FamilyMemberId.MAFITHA
+        val useVideo = joinWithVideo ?: incoming.videoEnabled
+        val roomName = incoming.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM }
         val members = if (incoming.isThreeWay) {
             listOf(self, FamilyMemberId.MITHUN, FamilyMemberId.MAFITHA, FamilyMemberId.ZAYN).distinct()
         } else {
             listOf(self, incoming.caller).distinct()
         }
         telecomManager.cancelIncomingCallNotification()
-        connectCallMedia(members, incoming.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM })
+        _callState.update {
+            it.copy(
+                isLocalMicMuted = false,
+                isLocalCameraOn = useVideo,
+                isVoiceCallMode = !useVideo,
+                isFrontCamera = true,
+                durationSeconds = 0L,
+                showLiveDrawingOverlay = false,
+                networkQualityLabel = if (useVideo) "Joining video call…" else "Joining voice call…"
+            )
+        }
+        telecomManager.startManagedFamilyCall(
+            callerOrTarget = incoming.caller,
+            isIncoming = false,
+            isVideo = useVideo,
+            onAnswered = { },
+            onDisconnected = { endCallInternal("Call ended", notifyRemote = false) }
+        )
+        connectCallMedia(members, roomName, useVideo)
     }
 
     fun declineIncomingCall() {
         val incoming = _callState.value.phase as? CallPhase.RingingIncoming
+        val self = _session.value.activeMember ?: FamilyMemberId.MITHUN
         telecomManager.cancelIncomingCallNotification()
         if (incoming != null) {
+            realtimeSignaling.broadcastCallDecline(
+                sender = self,
+                targets = listOf(incoming.caller),
+                roomName = incoming.roomName
+            )
+            val kind = if (incoming.videoEnabled) "Video" else "Voice"
             val missedLog = CallLogEntry(
                 id = UUID.randomUUID().toString(),
                 participantsLabel = incoming.caller.displayName,
-                callTypeLabel = if (incoming.isThreeWay) "3-Way Video (Declined)" else "1-on-1 Video (Declined)",
+                callTypeLabel = if (incoming.isThreeWay) "3-Way $kind (Declined)" else "1-on-1 $kind (Declined)",
                 isMissed = true,
                 timestampLabel = "Just now",
                 durationLabel = "Tap to call back"
@@ -1083,15 +1507,18 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         } else {
             _callState.update { it.copy(phase = CallPhase.Idle) }
         }
+        publishSelfPresenceNow(isHello = false)
     }
 
     fun inviteThirdMemberMidCall(member: FamilyMemberId) {
         val self = _session.value.activeMember ?: FamilyMemberId.MITHUN
+        val currentState = _callState.value
         realtimeSignaling.broadcastCallInvite(
             caller = self,
             targets = listOf(member),
-            roomName = _callState.value.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM },
-            isThreeWay = true
+            roomName = currentState.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM },
+            isThreeWay = true,
+            videoEnabled = currentState.isLocalCameraOn || !currentState.isVoiceCallMode
         )
         _callState.update { state ->
             if (state.participants.any { it.memberId == member }) return@update state
@@ -1109,25 +1536,34 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         _uiFeedback.tryEmit("Ringing ${member.displayName} to join the family call!")
     }
 
-    private fun connectCallMedia(members: List<FamilyMemberId>, roomName: String) {
+    private fun connectCallMedia(
+        members: List<FamilyMemberId>,
+        roomName: String,
+        videoEnabled: Boolean = _callState.value.isLocalCameraOn
+    ) {
         if (_callState.value.phase is CallPhase.Active) return
         val self = _session.value.activeMember ?: FamilyMemberId.MITHUN
+        val preferredRoute = _callState.value.audioRoute
         _callState.update { state ->
             state.copy(
                 roomName = roomName,
                 phase = CallPhase.Active,
+                isLocalCameraOn = videoEnabled,
+                isVoiceCallMode = !videoEnabled,
                 participants = members.map { member ->
                     CallParticipantState(
                         memberId = member,
                         isConnected = member == self,
                         isSpeaking = false,
                         audioLevel = if (member == self) 0.25f else 0f,
-                        isMuted = false,
-                        isCameraEnabled = member == self
+                        isMuted = if (member == self) state.isLocalMicMuted else false,
+                        isCameraEnabled = member == self && videoEnabled
                     )
                 }
             )
         }
+        publishSelfPresenceNow(isHello = false)
+
         viewModelScope.launch {
             CallForegroundService.start(
                 appContext,
@@ -1139,7 +1575,8 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                 member = self,
                 roomName = roomName,
                 enableMic = !_callState.value.isLocalMicMuted,
-                enableCamera = _callState.value.isLocalCameraOn
+                enableCamera = _callState.value.isLocalCameraOn,
+                audioRoute = preferredRoute
             )
             connectResult.onFailure {
                 _uiFeedback.tryEmit("Couldn't connect the call right now — please check internet.")
@@ -1177,10 +1614,10 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                         state.copy(durationSeconds = nextSec)
                     } else {
                         val updatedParticipants = state.participants.mapIndexed { idx, p ->
-                            val pulse = ((nextSec + idx) % 3L == 0L) && !p.isMuted
+                            val pulse = ((nextSec + idx) % 3L == 0L) && !p.isMuted && p.isConnected
                             p.copy(
                                 isSpeaking = pulse,
-                                audioLevel = if (p.isMuted) 0f else if (pulse) 0.82f else 0.24f
+                                audioLevel = if (p.isMuted || !p.isConnected) 0f else if (pulse) 0.72f else 0.18f
                             )
                         }
                         state.copy(durationSeconds = nextSec, participants = updatedParticipants)
@@ -1200,7 +1637,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
             state.copy(
                 isLocalMicMuted = nextMuted,
                 participants = state.participants.map {
-                    if (it.memberId == self) it.copy(isMuted = nextMuted, audioLevel = 0f) else it
+                    if (it.memberId == self) it.copy(isMuted = nextMuted, audioLevel = 0f, isSpeaking = false) else it
                 }
             )
         }
@@ -1215,14 +1652,17 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         _callState.update { state ->
             state.copy(
                 isLocalCameraOn = nextOn,
+                isVoiceCallMode = if (nextOn) false else state.isVoiceCallMode,
                 participants = state.participants.map {
                     if (it.memberId == self) it.copy(isCameraEnabled = nextOn) else it
                 }
             )
         }
+        publishSelfPresenceNow(isHello = false)
     }
 
     fun flipCamera() {
+        if (!_callState.value.isLocalCameraOn) return
         val nextFront = !_callState.value.isFrontCamera
         viewModelScope.launch { liveKitEngine.switchCamera() }
         _callState.update { it.copy(isFrontCamera = nextFront) }
@@ -1305,24 +1745,41 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun endActiveCall() {
-        endCallInternal("Call finished")
+        endCallInternal("Call finished", notifyRemote = true)
     }
 
-    private fun endCallInternal(reason: String) {
+    private fun endCallInternal(reason: String, notifyRemote: Boolean = true) {
+        val snapshot = _callState.value
+        val self = _session.value.activeMember ?: FamilyMemberId.MITHUN
+        val remoteConnected = liveKitEngine.connectedLiveMembers.value.any { it != self }
+
+        // If nobody answered yet, cancel ringing on the other family phones
+        if (notifyRemote && !remoteConnected && snapshot.phase !is CallPhase.Idle) {
+            val targets = snapshot.participants.map { it.memberId }.filter { it != self }
+            if (targets.isNotEmpty()) {
+                realtimeSignaling.broadcastCallEnded(
+                    sender = self,
+                    targets = targets,
+                    roomName = snapshot.roomName
+                )
+            }
+        }
+
         callTimerJob?.cancel()
+        telecomManager.endManagedCall()
         liveKitEngine.disconnect()
         CallForegroundService.stop(appContext)
-        val snapshot = _callState.value
         val mins = snapshot.durationSeconds / 60
         val secs = snapshot.durationSeconds % 60
         val callId = "call_${UUID.randomUUID()}"
         val participantsCsv = snapshot.participants.joinToString(",") { it.memberId.name }
-            .ifBlank { (_session.value.activeMember ?: FamilyMemberId.MITHUN).name }
+            .ifBlank { self.name }
+        val kindWord = if (snapshot.isVoiceCallMode && !snapshot.isLocalCameraOn) "Voice" else "Video"
         val log = CallLogEntry(
             id = callId,
             participantsLabel = snapshot.participants.joinToString(", ") { it.memberId.displayName }
                 .ifBlank { "Family Call" },
-            callTypeLabel = if (snapshot.participants.size >= 3) "3-Way Video" else "1-on-1 Video",
+            callTypeLabel = if (snapshot.participants.size >= 3) "3-Way $kindWord" else "1-on-1 $kindWord",
             isMissed = false,
             timestampLabel = "Just now",
             durationLabel = "%02d:%02d".format(mins, secs)
@@ -1331,12 +1788,14 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
             it.copy(
                 phase = CallPhase.Idle,
                 durationSeconds = 0L,
+                isLocalMicMuted = false,
                 showLiveDrawingOverlay = false,
                 recentCallLogs = listOf(log) + it.recentCallLogs
             )
         }
+        publishSelfPresenceNow(isHello = false)
         if (snapshot.durationSeconds > 0L) {
-            val caller = _session.value.deviceOwner ?: _session.value.activeMember ?: FamilyMemberId.MITHUN
+            val caller = _session.value.deviceOwner ?: self
             val startedAtMs = (System.currentTimeMillis() - snapshot.durationSeconds * 1000L).coerceAtLeast(1L)
             viewModelScope.launch(Dispatchers.IO) {
                 syncRepo.insertCallLog(
@@ -1383,13 +1842,18 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun startWalkieTalkieHold() {
+        recordUserInteraction()
         val started = voiceCapture.startAacRecording("walkie")
         _isWalkieRecording.value = started != null
+        if (_isWalkieRecording.value) {
+            publishSelfPresenceNow(isHello = false)
+        }
     }
 
     fun releaseWalkieTalkieHold() {
         if (!_isWalkieRecording.value) return
         _isWalkieRecording.value = false
+        publishSelfPresenceNow(isHello = false)
         when (val result = voiceCapture.stopRecording()) {
             is StopRecordingResult.Saved -> {
                 val durationSec = (result.durationMs / 1000L).coerceIn(1L, 60L)
@@ -2052,9 +2516,18 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         networkCallback?.let { runCatching { cm.unregisterNetworkCallback(it) } }
     }
 
+    private data class LiveKitRoomSnapshot(
+        val connected: Set<FamilyMemberId>,
+        val speaking: Set<FamilyMemberId>,
+        val tracks: Map<FamilyMemberId, io.livekit.android.room.track.VideoTrack>,
+        val muted: Set<FamilyMemberId>,
+        val liveActive: Boolean
+    )
+
     companion object {
         private const val PREFS_DEVICE_BINDING = "holymoly_device_binding"
-        private const val KEY_ASSIGNED_MEMBER = "assigned_member_id"
-        private const val PRESENCE_TIMEOUT_MS = 30_000L
+        private const val KEY_ASSIGNED_MEMBER = "logged_in_member_v2"
+        private const val PRESENCE_TIMEOUT_MS = 35_000L
+        private const val IDLE_AWAY_TIMEOUT_MS = 180_000L
     }
 }

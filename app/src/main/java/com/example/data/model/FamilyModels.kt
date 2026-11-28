@@ -88,20 +88,59 @@ enum class MomentCategory(val title: String, val subtitle: String) {
     REMEMBER("Remember", "Save a little story")
 }
 
+@Serializable
+enum class PresenceAvailability(val label: String) {
+    ONLINE("Online"),
+    AWAY("Away"),
+    BUSY("Busy"),
+    OFFLINE("Offline")
+}
+
+fun PresenceAvailability.statusColor(): Color = when (this) {
+    PresenceAvailability.ONLINE -> Color(0xFF10B981)
+    PresenceAvailability.AWAY -> Color(0xFFF5A623)
+    PresenceAvailability.BUSY -> Color(0xFFF06458)
+    PresenceAvailability.OFFLINE -> Color(0xFFAABFC1)
+}
+
 data class MemberPresenceStatus(
     val memberId: FamilyMemberId,
-    val isOnline: Boolean = false,
+    val availability: PresenceAvailability = PresenceAvailability.OFFLINE,
+    val statusNote: String? = null,
     val lastSeenMs: Long? = null
 ) {
+    val isOnline: Boolean
+        get() = availability != PresenceAvailability.OFFLINE
+
+    fun shortBadgeLabel(): String = when (availability) {
+        PresenceAvailability.ONLINE -> "Online"
+        PresenceAvailability.AWAY -> "Away"
+        PresenceAvailability.BUSY -> statusNote?.takeIf { it.isNotBlank() && it.length <= 10 } ?: "Busy"
+        PresenceAvailability.OFFLINE -> "Offline"
+    }
+
     fun statusLabel(isSelf: Boolean, nowMs: Long = System.currentTimeMillis()): String {
-        if (isSelf) return if (isOnline) "You • Online" else "You • Offline"
-        if (isOnline) return "Online now"
-        val seen = lastSeenMs ?: return "Offline"
-        val elapsedMin = ((nowMs - seen) / 60_000L).coerceAtLeast(0L)
-        return when {
-            elapsedMin < 1L -> "Just went offline"
-            elapsedMin < 60L -> "Seen ${elapsedMin}m ago"
-            else -> "Offline"
+        if (isSelf) {
+            return when (availability) {
+                PresenceAvailability.ONLINE -> "You • Online"
+                PresenceAvailability.AWAY -> "You • Away"
+                PresenceAvailability.BUSY -> statusNote?.takeIf { it.isNotBlank() }?.let { "You • $it" } ?: "You • Busy"
+                PresenceAvailability.OFFLINE -> "You • Offline"
+            }
+        }
+        return when (availability) {
+            PresenceAvailability.ONLINE -> "Online"
+            PresenceAvailability.AWAY -> statusNote?.takeIf { it.isNotBlank() } ?: "Away"
+            PresenceAvailability.BUSY -> statusNote?.takeIf { it.isNotBlank() } ?: "Busy"
+            PresenceAvailability.OFFLINE -> {
+                val seen = lastSeenMs ?: return "Offline"
+                val elapsedMin = ((nowMs - seen) / 60_000L).coerceAtLeast(0L)
+                when {
+                    elapsedMin < 1L -> "Offline"
+                    elapsedMin < 60L -> "Seen ${elapsedMin}m ago"
+                    else -> "Offline"
+                }
+            }
         }
     }
 }
@@ -123,11 +162,15 @@ data class UserSessionState(
 
 sealed interface CallPhase {
     data object Idle : CallPhase
-    data class DialingOutgoing(val targetMembers: List<FamilyMemberId>) : CallPhase
+    data class DialingOutgoing(
+        val targetMembers: List<FamilyMemberId>,
+        val videoEnabled: Boolean = true
+    ) : CallPhase
     data class RingingIncoming(
         val caller: FamilyMemberId,
         val isThreeWay: Boolean,
-        val roomName: String
+        val roomName: String,
+        val videoEnabled: Boolean = true
     ) : CallPhase
     data object Active : CallPhase
     data class Reconnecting(val reason: String) : CallPhase
@@ -161,10 +204,11 @@ data class LiveStroke(
 
 data class CallState(
     val phase: CallPhase = CallPhase.Idle,
-    val roomName: String = "kinnest-family-room",
+    val roomName: String = "holymoly-family-room",
     val participants: List<CallParticipantState> = emptyList(),
     val isLocalMicMuted: Boolean = false,
     val isLocalCameraOn: Boolean = true,
+    val isVoiceCallMode: Boolean = false,
     val isFrontCamera: Boolean = true,
     val audioRoute: AudioRoute = AudioRoute.SPEAKER,
     val activeFilter: ArFilterType = ArFilterType.NONE,

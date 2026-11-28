@@ -1,7 +1,9 @@
 package com.example.sync
 
+import android.util.Log
 import com.example.BuildConfig
 import com.example.data.model.FamilyMemberId
+import com.example.data.model.PresenceAvailability
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.realtime.Realtime
@@ -11,7 +13,9 @@ import io.github.jan.supabase.realtime.broadcastFlow
 import io.github.jan.supabase.realtime.channel
 import io.github.jan.supabase.realtime.realtime
 import io.ktor.client.engine.okhttp.OkHttp
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -27,16 +31,24 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.seconds
 
 @Serializable
 data class FamilyRealtimeSignal(
-    val kind: String, // CALL_INVITE, CALL_DECLINE, CHAT_MESSAGE, HEARTBEAT, DAILY_COMIC, PRESENCE_*
+    val kind: String, // CALL_INVITE, CALL_DECLINE, CALL_END, CHAT_MESSAGE, HEARTBEAT, DAILY_COMIC, PRESENCE_*
     val senderId: String,
     val targetIdsCsv: String = "MITHUN,MAFITHA,ZAYN",
     val roomName: String = "holymoly-family-room",
     val isThreeWay: Boolean = true,
+    val videoEnabled: Boolean = true,
     val threadId: String = "family_group",
     val messageId: String = "",
     val text: String = "",
@@ -46,30 +58,63 @@ data class FamilyRealtimeSignal(
     val comicStyle: String = "",
     val imageBase64: String = "",
     val mediaUrl: String = "",
+    val presenceStatus: String = "",
+    val statusNote: String = "",
     val timestampMs: Long = 0L
 )
 
+data class RealtimePresenceEntry(
+    val memberId: FamilyMemberId,
+    val availability: PresenceAvailability,
+    val statusNote: String? = null,
+    val updatedAtMs: Long = System.currentTimeMillis()
+)
+
 /**
- * Zero-schema Supabase Realtime Broadcast Signaling Hub for Mithun (Vapi), Mafitha (Ummi), and Zayn Adam.
- * Manages WebSocket lifecycle cleanly across foreground/background and network transitions so
- * Android socket suspension does not cause aborted WebSocket read loops.
+ * Supabase Realtime Signaling + Native Realtime Presence Hub for Mithun (Vapi), Mafitha (Ummi),
+ * and Zayn Adam:
+ * - Native Supabase Realtime Presence (`presenceChangeFlow` + `track` / `untrack`) automatically
+ *   syncs 'Online', 'Away', and 'Busy' state and detects abrupt disconnects via server `leaves`.
+ * - Broadcast channel delivers sub-second video/voice call invites, declines, cancellations,
+ *   chat messages, XOXO moves, and redundant presence pings for instant responsiveness.
  */
 class SupabaseRealtimeSignaling {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val coroutineErrorHandler = CoroutineExceptionHandler { _, throwable ->
+        Log.w(TAG, "Supabase realtime background error", throwable)
+        _isSubscribed.value = false
+    }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + coroutineErrorHandler)
     private val connectionMutex = Mutex()
 
     @Volatile
     private var shouldStayConnected = false
 
+    @Volatile
+    private var trackedMember: FamilyMemberId? = null
+
+    @Volatile
+    private var trackedAvailability: PresenceAvailability = PresenceAvailability.ONLINE
+
+    @Volatile
+    private var trackedStatusNote: String? = null
+
     private var channel: RealtimeChannel? = null
-    private var collectorJob: Job? = null
+    private var broadcastCollectorJob: Job? = null
+    private var presenceCollectorJob: Job? = null
+
+    // Tracks presence entries keyed by Supabase presence key so multi-tab/reconnect leaves stay accurate
+    private val activePresenceByKey = ConcurrentHashMap<String, RealtimePresenceEntry>()
 
     private val _isSubscribed = MutableStateFlow(false)
     val isSubscribed: StateFlow<Boolean> = _isSubscribed.asStateFlow()
 
-    private val _incomingSignals = MutableSharedFlow<FamilyRealtimeSignal>(extraBufferCapacity = 32)
+    private val _incomingSignals = MutableSharedFlow<FamilyRealtimeSignal>(extraBufferCapacity = 48)
     val incomingSignals: SharedFlow<FamilyRealtimeSignal> = _incomingSignals.asSharedFlow()
+
+    private val _realtimePresenceMap = MutableStateFlow<Map<FamilyMemberId, RealtimePresenceEntry>>(emptyMap())
+    val realtimePresenceMap: StateFlow<Map<FamilyMemberId, RealtimePresenceEntry>> =
+        _realtimePresenceMap.asStateFlow()
 
     private val client: SupabaseClient? by lazy {
         if (!isConfigured()) return@lazy null
@@ -102,11 +147,28 @@ class SupabaseRealtimeSignaling {
             !key.contains("your-supabase-anon-key")
     }
 
-    fun connectIfConfigured() {
+    fun connectIfConfigured(
+        member: FamilyMemberId? = trackedMember,
+        availability: PresenceAvailability = trackedAvailability,
+        statusNote: String? = trackedStatusNote
+    ) {
         if (!isConfigured()) return
+        if (member != null) {
+            trackedMember = member
+            trackedAvailability = availability
+            trackedStatusNote = statusNote
+        }
         shouldStayConnected = true
         scope.launch {
-            ensureConnectedInternal()
+            runCatching {
+                val active = ensureConnectedInternal()
+                val m = trackedMember
+                if (active != null && m != null) {
+                    pushPresenceTrackInternal(active, m, trackedAvailability, trackedStatusNote)
+                }
+            }.onFailure { err ->
+                Log.w(TAG, "connectIfConfigured failed", err)
+            }
         }
     }
 
@@ -120,39 +182,186 @@ class SupabaseRealtimeSignaling {
         }
 
         return runCatching {
-            collectorJob?.cancel()
-            collectorJob = null
+            broadcastCollectorJob?.cancel()
+            broadcastCollectorJob = null
+            presenceCollectorJob?.cancel()
+            presenceCollectorJob = null
             runCatching { supabase.realtime.removeAllChannels() }
 
-            val realtimeChannel = supabase.realtime.channel(FAMILY_SIGNAL_CHANNEL)
+            val presenceKey = trackedMember?.name ?: "family_device_${System.currentTimeMillis()}"
+            val realtimeChannel = supabase.realtime.channel(FAMILY_SIGNAL_CHANNEL) {
+                presence {
+                    key = presenceKey
+                }
+            }
             channel = realtimeChannel
 
-            collectorJob = scope.launch {
-                realtimeChannel
-                    .broadcastFlow<FamilyRealtimeSignal>(event = SIGNAL_EVENT)
-                    .catch {
-                        _isSubscribed.value = false
+            // 1. Register Broadcast & Presence flows BEFORE calling subscribe() to avoid
+            // IllegalStateException ("cannot call presenceChangeFlow/broadcastFlow after joining")
+            val broadcastFlow = runCatching {
+                realtimeChannel.broadcastFlow<FamilyRealtimeSignal>(event = SIGNAL_EVENT)
+            }.getOrNull()
+            val presenceFlow = runCatching {
+                realtimeChannel.presenceChangeFlow()
+            }.getOrNull()
+
+            if (broadcastFlow != null) {
+                broadcastCollectorJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    runCatching {
+                        broadcastFlow
+                            .catch { err ->
+                                Log.w(TAG, "Broadcast flow error", err)
+                                _isSubscribed.value = false
+                            }
+                            .collect { payload ->
+                                _incomingSignals.tryEmit(payload)
+                            }
                     }
-                    .collect { payload ->
-                        _incomingSignals.tryEmit(payload)
-                    }
+                }
             }
 
-            withTimeoutOrNull(10_000L) {
-                realtimeChannel.subscribe(blockUntilSubscribed = true)
+            if (presenceFlow != null) {
+                presenceCollectorJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    runCatching {
+                        presenceFlow
+                            .catch { err ->
+                                Log.w(TAG, "Presence flow error", err)
+                                _isSubscribed.value = false
+                            }
+                            .collect { action ->
+                                action.leaves.forEach { (key, presence) ->
+                                    val stateMember = parsePresenceState(presence.state)?.memberId
+                                    val removed = activePresenceByKey.remove(key)
+                                    if (removed == null && stateMember != null) {
+                                        activePresenceByKey.entries.removeAll { it.value.memberId == stateMember }
+                                    }
+                                }
+                                action.joins.forEach { (key, presence) ->
+                                    val parsed = parsePresenceState(presence.state)
+                                    if (parsed != null) {
+                                        activePresenceByKey[key] = parsed
+                                    }
+                                }
+                                publishPresenceSnapshot()
+                            }
+                    }
+                }
             }
-            if (!shouldStayConnected) {
+
+            val subscribed = withTimeoutOrNull(10_000L) {
+                realtimeChannel.subscribe(blockUntilSubscribed = true)
+                true
+            } ?: false
+            if (!shouldStayConnected || !subscribed) {
                 runCatching { realtimeChannel.unsubscribe() }
-                runCatching { supabase.realtime.disconnect() }
+                if (!shouldStayConnected) {
+                    runCatching { supabase.realtime.disconnect() }
+                }
                 channel = null
                 _isSubscribed.value = false
                 return@runCatching null
             }
             _isSubscribed.value = true
+
+            // Immediately publish our own Realtime Presence state on subscribe/reconnect
+            val self = trackedMember
+            if (self != null) {
+                pushPresenceTrackInternal(realtimeChannel, self, trackedAvailability, trackedStatusNote)
+            }
             realtimeChannel
-        }.getOrElse {
+        }.getOrElse { err ->
+            Log.w(TAG, "ensureConnectedInternal failed", err)
             _isSubscribed.value = false
             null
+        }
+    }
+
+    private fun parsePresenceState(state: JsonObject): RealtimePresenceEntry? {
+        val memberRaw = state["member_id"]?.jsonPrimitive?.contentOrNull ?: return null
+        val member = runCatching { FamilyMemberId.valueOf(memberRaw) }.getOrNull() ?: return null
+        val statusRaw = state["status"]?.jsonPrimitive?.contentOrNull
+        val availability = statusRaw?.let {
+            runCatching { PresenceAvailability.valueOf(it) }.getOrNull()
+        } ?: PresenceAvailability.ONLINE
+        val note = state["note"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        val updated = state["updated_at_ms"]?.jsonPrimitive?.longOrNull ?: System.currentTimeMillis()
+        return RealtimePresenceEntry(
+            memberId = member,
+            availability = availability,
+            statusNote = note,
+            updatedAtMs = updated
+        )
+    }
+
+    private fun publishPresenceSnapshot() {
+        val grouped = mutableMapOf<FamilyMemberId, RealtimePresenceEntry>()
+        activePresenceByKey.values.forEach { entry ->
+            val existing = grouped[entry.memberId]
+            if (existing == null || entry.updatedAtMs >= existing.updatedAtMs) {
+                grouped[entry.memberId] = entry
+            }
+        }
+        _realtimePresenceMap.value = grouped
+    }
+
+    private suspend fun pushPresenceTrackInternal(
+        activeChannel: RealtimeChannel,
+        member: FamilyMemberId,
+        availability: PresenceAvailability,
+        statusNote: String?
+    ) {
+        val now = System.currentTimeMillis()
+        runCatching {
+            if (availability == PresenceAvailability.OFFLINE) {
+                activeChannel.untrack()
+            } else {
+                activeChannel.track(
+                    buildJsonObject {
+                        put("member_id", member.name)
+                        put("status", availability.name)
+                        put("note", statusNote.orEmpty())
+                        put("updated_at_ms", now)
+                    }
+                )
+            }
+        }
+    }
+
+    /**
+     * Tracks the member's live status ('Online', 'Away', or 'Busy') in Supabase Realtime Presence
+     * AND broadcasts an immediate presence update so all 3 family phones reflect changes instantly.
+     */
+    fun trackPresence(
+        member: FamilyMemberId,
+        availability: PresenceAvailability,
+        statusNote: String? = null,
+        isHello: Boolean = false
+    ) {
+        trackedMember = member
+        trackedAvailability = availability
+        trackedStatusNote = statusNote
+        if (!isConfigured() || !shouldStayConnected) return
+
+        val now = System.currentTimeMillis()
+        val broadcastPayload = FamilyRealtimeSignal(
+            kind = if (availability == PresenceAvailability.OFFLINE) KIND_PRESENCE_OFFLINE else KIND_PRESENCE_PING,
+            senderId = member.name,
+            text = if (isHello) "HELLO" else availability.name,
+            presenceStatus = availability.name,
+            statusNote = statusNote.orEmpty(),
+            timestampMs = now
+        )
+
+        scope.launch {
+            runCatching {
+                val activeChannel = if (channel != null && _isSubscribed.value) {
+                    channel
+                } else {
+                    ensureConnectedInternal()
+                } ?: return@launch
+                pushPresenceTrackInternal(activeChannel, member, availability, statusNote)
+                activeChannel.broadcast(event = SIGNAL_EVENT, message = broadcastPayload)
+            }
         }
     }
 
@@ -160,7 +369,8 @@ class SupabaseRealtimeSignaling {
         caller: FamilyMemberId,
         targets: List<FamilyMemberId>,
         roomName: String,
-        isThreeWay: Boolean
+        isThreeWay: Boolean,
+        videoEnabled: Boolean = true
     ) {
         val payload = FamilyRealtimeSignal(
             kind = KIND_CALL_INVITE,
@@ -168,6 +378,37 @@ class SupabaseRealtimeSignaling {
             targetIdsCsv = targets.joinToString(",") { it.name },
             roomName = roomName,
             isThreeWay = isThreeWay,
+            videoEnabled = videoEnabled,
+            timestampMs = System.currentTimeMillis()
+        )
+        sendSignal(payload)
+    }
+
+    fun broadcastCallDecline(
+        sender: FamilyMemberId,
+        targets: List<FamilyMemberId>,
+        roomName: String
+    ) {
+        val payload = FamilyRealtimeSignal(
+            kind = KIND_CALL_DECLINE,
+            senderId = sender.name,
+            targetIdsCsv = targets.joinToString(",") { it.name },
+            roomName = roomName,
+            timestampMs = System.currentTimeMillis()
+        )
+        sendSignal(payload)
+    }
+
+    fun broadcastCallEnded(
+        sender: FamilyMemberId,
+        targets: List<FamilyMemberId>,
+        roomName: String
+    ) {
+        val payload = FamilyRealtimeSignal(
+            kind = KIND_CALL_END,
+            senderId = sender.name,
+            targetIdsCsv = targets.joinToString(",") { it.name },
+            roomName = roomName,
             timestampMs = System.currentTimeMillis()
         )
         sendSignal(payload)
@@ -286,15 +527,16 @@ class SupabaseRealtimeSignaling {
 
     fun broadcastPresencePing(
         member: FamilyMemberId,
+        availability: PresenceAvailability = PresenceAvailability.ONLINE,
+        statusNote: String? = null,
         isHello: Boolean = false
     ) {
-        val payload = FamilyRealtimeSignal(
-            kind = KIND_PRESENCE_PING,
-            senderId = member.name,
-            text = if (isHello) "HELLO" else "ONLINE",
-            timestampMs = System.currentTimeMillis()
+        trackPresence(
+            member = member,
+            availability = availability,
+            statusNote = statusNote,
+            isHello = isHello
         )
-        sendSignal(payload)
     }
 
     fun broadcastXoxoState(
@@ -316,6 +558,7 @@ class SupabaseRealtimeSignaling {
             kind = KIND_PRESENCE_OFFLINE,
             senderId = member.name,
             text = "OFFLINE",
+            presenceStatus = PresenceAvailability.OFFLINE.name,
             timestampMs = System.currentTimeMillis()
         )
         scope.launch {
@@ -323,6 +566,7 @@ class SupabaseRealtimeSignaling {
                 val activeChannel = channel
                 if (activeChannel != null && _isSubscribed.value) {
                     withTimeoutOrNull(1_200L) {
+                        runCatching { activeChannel.untrack() }
                         activeChannel.broadcast(event = SIGNAL_EVENT, message = payload)
                     }
                 }
@@ -345,10 +589,13 @@ class SupabaseRealtimeSignaling {
     }
 
     /**
-     * Cleanly broadcasts an optional offline presence notice and closes the Realtime WebSocket
-     * before Android suspends network sockets in the background or on connectivity loss.
+     * Cleanly untracks presence, broadcasts an optional away/offline notice, and closes the
+     * Realtime WebSocket before Android suspends network sockets in the background.
      */
-    fun disconnectGracefully(offlineMember: FamilyMemberId? = null) {
+    fun disconnectGracefully(
+        offlineMember: FamilyMemberId? = null,
+        finalAvailability: PresenceAvailability = PresenceAvailability.OFFLINE
+    ) {
         shouldStayConnected = false
         scope.launch {
             connectionMutex.withLock {
@@ -356,20 +603,30 @@ class SupabaseRealtimeSignaling {
                 if (offlineMember != null && activeChannel != null && _isSubscribed.value) {
                     runCatching {
                         withTimeoutOrNull(1_000L) {
+                            runCatching { activeChannel.untrack() }
                             activeChannel.broadcast(
                                 event = SIGNAL_EVENT,
                                 message = FamilyRealtimeSignal(
-                                    kind = KIND_PRESENCE_OFFLINE,
+                                    kind = if (finalAvailability == PresenceAvailability.OFFLINE) {
+                                        KIND_PRESENCE_OFFLINE
+                                    } else {
+                                        KIND_PRESENCE_PING
+                                    },
                                     senderId = offlineMember.name,
-                                    text = "OFFLINE",
+                                    text = finalAvailability.name,
+                                    presenceStatus = finalAvailability.name,
                                     timestampMs = System.currentTimeMillis()
                                 )
                             )
                         }
                     }
                 }
-                collectorJob?.cancel()
-                collectorJob = null
+                broadcastCollectorJob?.cancel()
+                broadcastCollectorJob = null
+                presenceCollectorJob?.cancel()
+                presenceCollectorJob = null
+                activePresenceByKey.clear()
+                _realtimePresenceMap.value = emptyMap()
                 runCatching { activeChannel?.unsubscribe() }
                 runCatching { client?.realtime?.removeAllChannels() }
                 runCatching { client?.realtime?.disconnect() }
@@ -384,10 +641,13 @@ class SupabaseRealtimeSignaling {
     }
 
     companion object {
+        private const val TAG = "SupabaseRealtime"
         private const val FAMILY_SIGNAL_CHANNEL = "holymoly-family-signal"
         private const val SIGNAL_EVENT = "family_signal"
 
         const val KIND_CALL_INVITE = "CALL_INVITE"
+        const val KIND_CALL_DECLINE = "CALL_DECLINE"
+        const val KIND_CALL_END = "CALL_END"
         const val KIND_HEARTBEAT = "HEARTBEAT"
         const val KIND_CHAT_MESSAGE = "CHAT_MESSAGE"
         const val KIND_DAILY_COMIC = "DAILY_COMIC"

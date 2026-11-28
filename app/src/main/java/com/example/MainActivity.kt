@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -64,6 +65,7 @@ class MainActivity : FragmentActivity() {
     private var pendingWidgetAction: String? = null
     private var pendingIncomingCaller: String? = null
     private var pendingIncomingThreeWay: Boolean = false
+    private var pendingIncomingVideoEnabled: Boolean = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -85,6 +87,7 @@ class MainActivity : FragmentActivity() {
                 initialAction = pendingWidgetAction,
                 initialCaller = pendingIncomingCaller,
                 initialThreeWay = pendingIncomingThreeWay,
+                initialVideoEnabled = pendingIncomingVideoEnabled,
                 onConsumeLaunchIntent = {
                     pendingWidgetAction = null
                     pendingIncomingCaller = null
@@ -103,6 +106,7 @@ class MainActivity : FragmentActivity() {
         pendingWidgetAction = intent?.getStringExtra(FamilyTelecomManager.EXTRA_ACTION)
         pendingIncomingCaller = intent?.getStringExtra(FamilyTelecomManager.EXTRA_CALLER_ID)
         pendingIncomingThreeWay = intent?.getBooleanExtra(FamilyTelecomManager.EXTRA_THREE_WAY, false) ?: false
+        pendingIncomingVideoEnabled = intent?.getBooleanExtra(FamilyTelecomManager.EXTRA_VIDEO_ENABLED, true) ?: true
     }
 }
 
@@ -112,9 +116,11 @@ private fun KinNestAppRoot(
     initialAction: String?,
     initialCaller: String?,
     initialThreeWay: Boolean,
+    initialVideoEnabled: Boolean,
     onConsumeLaunchIntent: () -> Unit
 ) {
     val session by viewModel.session.collectAsStateWithLifecycle()
+    val loginUiState by viewModel.loginUiState.collectAsStateWithLifecycle()
     val callState by viewModel.callState.collectAsStateWithLifecycle()
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
     val allMessages by viewModel.allMessages.collectAsStateWithLifecycle()
@@ -159,7 +165,7 @@ private fun KinNestAppRoot(
                 val caller = runCatching {
                     FamilyMemberId.valueOf(initialCaller ?: FamilyMemberId.MAFITHA.name)
                 }.getOrDefault(FamilyMemberId.MAFITHA)
-                viewModel.simulateIncomingCall(caller, initialThreeWay)
+                viewModel.simulateIncomingCall(caller, initialThreeWay, initialVideoEnabled)
                 onConsumeLaunchIntent()
             }
             FamilyTelecomManager.ACTION_QUICK_CALL -> {
@@ -223,12 +229,19 @@ private fun KinNestAppRoot(
                     composable<KinNestRoute.LoginPortal> {
                         AvatarLoginScreen(
                             profiles = profiles,
-                            onConfirmDeviceOwner = { member ->
-                                viewModel.assignThisDeviceToMember(member)
-                                navController.navigate(KinNestRoute.Workspace(0)) {
-                                    popUpTo<KinNestRoute.LoginPortal> { inclusive = true }
-                                }
-                            }
+                            loginUiState = loginUiState,
+                            onSubmitLogin = { username, password ->
+                                viewModel.loginWithCredentials(
+                                    username = username,
+                                    password = password,
+                                    onLoginSuccess = {
+                                        navController.navigate(KinNestRoute.Workspace(0)) {
+                                            popUpTo<KinNestRoute.LoginPortal> { inclusive = true }
+                                        }
+                                    }
+                                )
+                            },
+                            onClearError = viewModel::clearLoginError
                         )
                     }
 
@@ -244,11 +257,30 @@ private fun KinNestAppRoot(
                         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                             val isWideScreen = maxWidth >= 840.dp
 
+                            if (selectedTab == WorkspaceTab.CHAT) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(
+                                            androidx.compose.ui.graphics.Brush.verticalGradient(
+                                                colorStops = arrayOf(
+                                                    0.0f to androidx.compose.ui.graphics.Color(0xFF5D96F5),
+                                                    0.45f to androidx.compose.ui.graphics.Color(0xFF3E78E8),
+                                                    1.0f to androidx.compose.ui.graphics.Color(0xFF2356C8)
+                                                )
+                                            )
+                                        )
+                                )
+                            }
+
                             Row(modifier = Modifier.fillMaxSize()) {
                                 if (isWideScreen) {
                                     KinNestNavigationRail(
                                         selectedTab = selectedTab,
-                                        onSelectTab = { selectedTabOrdinal = it.index }
+                                        onSelectTab = {
+                                            viewModel.recordUserInteraction()
+                                            selectedTabOrdinal = it.index
+                                        }
                                     )
                                 }
 
@@ -260,7 +292,10 @@ private fun KinNestAppRoot(
                                             KinNestToyBottomDock(
                                                 selectedTab = selectedTab,
                                                 unreadCount = allMessages.count { it.deliveryStatus == "QUEUED_OFFLINE" },
-                                                onSelectTab = { selectedTabOrdinal = it.index }
+                                                onSelectTab = {
+                                                    viewModel.recordUserInteraction()
+                                                    selectedTabOrdinal = it.index
+                                                }
                                             )
                                         }
                                     }
@@ -285,16 +320,11 @@ private fun KinNestAppRoot(
                                                         profiles = profiles,
                                                         memberPresence = memberPresence,
                                                         isWalkieRecording = isWalkieRecording,
-                                                        onCallSpecificMember = { target ->
-                                                            viewModel.startFamilyCall(listOf(target))
-                                                        },
-                                                        onCustomizeMyProfile = { badge, uri ->
-                                                            val self = session.deviceOwner ?: session.activeMember ?: FamilyMemberId.MITHUN
-                                                            viewModel.updateMemberPersonalization(self, badge, uri)
-                                                        },
+                                                        onSelectPresenceStatus = viewModel::setMyPresenceAvailability,
                                                         onWalkiePressStart = viewModel::startWalkieTalkieHold,
                                                         onWalkiePressRelease = viewModel::releaseWalkieTalkieHold,
                                                         onOpenSettings = {
+                                                            viewModel.recordUserInteraction()
                                                             navController.navigate(KinNestRoute.ParentalSettings)
                                                         }
                                                     )
@@ -306,17 +336,38 @@ private fun KinNestAppRoot(
                                                         callState = callState,
                                                         profiles = profiles,
                                                         memberPresence = memberPresence,
-                                                        onStartThreeWayCall = {
+                                                        onCycleMyPresenceStatus = viewModel::cycleMyPresenceAvailability,
+                                                        onStartGroupVideoCall = {
                                                             viewModel.startFamilyCall(
-                                                                listOf(
+                                                                targets = listOf(
                                                                     FamilyMemberId.MITHUN,
                                                                     FamilyMemberId.MAFITHA,
                                                                     FamilyMemberId.ZAYN
-                                                                )
+                                                                ),
+                                                                videoEnabled = true
                                                             )
                                                         },
-                                                        onStartOneOnOneCall = { target ->
-                                                            viewModel.startFamilyCall(listOf(target))
+                                                        onStartIndividualVideoCall = { target ->
+                                                            viewModel.startFamilyCall(
+                                                                targets = listOf(target),
+                                                                videoEnabled = true
+                                                            )
+                                                        },
+                                                        onStartGroupVoiceCall = {
+                                                            viewModel.startFamilyCall(
+                                                                targets = listOf(
+                                                                    FamilyMemberId.MITHUN,
+                                                                    FamilyMemberId.MAFITHA,
+                                                                    FamilyMemberId.ZAYN
+                                                                ),
+                                                                videoEnabled = false
+                                                            )
+                                                        },
+                                                        onStartIndividualVoiceCall = { target ->
+                                                            viewModel.startFamilyCall(
+                                                                targets = listOf(target),
+                                                                videoEnabled = false
+                                                            )
                                                         },
                                                         onCycleAudioRoute = viewModel::cycleAudioRoute
                                                     )
@@ -375,6 +426,7 @@ private fun KinNestAppRoot(
                         ActiveVideoCallScreen(
                             selfMember = session.activeMember ?: FamilyMemberId.MITHUN,
                             callState = callState,
+                            profiles = profiles,
                             liveKitRoom = liveKitRoom,
                             isLiveStreamActive = isLiveStreamActive,
                             videoTracksByMember = videoTracksByMember,
@@ -400,8 +452,10 @@ private fun KinNestAppRoot(
                         IncomingCallOverlayScreen(
                             caller = ringing?.caller ?: FamilyMemberId.MAFITHA,
                             isThreeWay = ringing?.isThreeWay ?: true,
+                            videoEnabled = ringing?.videoEnabled ?: !callState.isVoiceCallMode,
                             profiles = profiles,
-                            onAccept = viewModel::acceptIncomingCall,
+                            onAccept = { viewModel.acceptIncomingCall() },
+                            onAcceptVoiceOnly = { viewModel.acceptIncomingCall(joinWithVideo = false) },
                             onDecline = viewModel::declineIncomingCall
                         )
                     }
@@ -411,6 +465,10 @@ private fun KinNestAppRoot(
                             session = session,
                             profiles = profiles,
                             parentLogs = allActivities.filter { it.kind == "PARENT_LOG" },
+                            onCustomizeMyProfile = { badge, uri ->
+                                val self = session.deviceOwner ?: session.activeMember ?: FamilyMemberId.MITHUN
+                                viewModel.updateMemberPersonalization(self, badge, uri)
+                            },
                             onUnlockWithPin = viewModel::unlockParentControlsWithPin,
                             onBiometricUnlocked = viewModel::markParentControlsBiometricUnlocked,
                             onUpdatePin = viewModel::updateParentPin,
@@ -431,6 +489,12 @@ private fun KinNestAppRoot(
                             onLockAndBack = {
                                 viewModel.lockParentControls()
                                 navController.popBackStack()
+                            },
+                            onSignOut = {
+                                viewModel.signOut()
+                                navController.navigate(KinNestRoute.LoginPortal) {
+                                    popUpTo(0) { inclusive = true }
+                                }
                             }
                         )
                     }

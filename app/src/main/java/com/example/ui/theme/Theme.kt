@@ -27,58 +27,58 @@ data class KinNestAccessibilityConfig(
 val LocalKinNestAccessibility = staticCompositionLocalOf { KinNestAccessibilityConfig() }
 
 private val KinNestLightColorScheme = lightColorScheme(
-    primary = StudioTealDeep,
+    primary = ClayCoral,
     onPrimary = Color.White,
-    primaryContainer = StudioTealSoft,
-    onPrimaryContainer = Color(0xFF093645),
-    secondary = CoralSalmon,
+    primaryContainer = ClayPeach,
+    onPrimaryContainer = ClayDeepTealInk,
+    secondary = ClayAqua,
     onSecondary = Color.White,
-    secondaryContainer = CoralSalmonSoft,
-    onSecondaryContainer = Color(0xFF6B2222),
-    tertiary = PowderSkyDeep,
+    secondaryContainer = ClayVanilla,
+    onSecondaryContainer = ClayDeepTealInk,
+    tertiary = ClayHoney,
     onTertiary = Color.White,
-    tertiaryContainer = PowderSky,
-    onTertiaryContainer = Color(0xFF0D2B45),
-    error = CrimsonDecline,
+    tertiaryContainer = ClayPeachLight,
+    onTertiaryContainer = ClayCocoaInk,
+    error = ClayCoralDeep,
     onError = Color.White,
-    background = LightBackgroundTop,
-    onBackground = LightOnSurface,
-    surface = LightSurfaceClay,
-    onSurface = LightOnSurface,
-    surfaceVariant = Color(0xFFECECEC),
-    onSurfaceVariant = LightOnSurfaceMuted,
-    outline = Color(0xFFD0D9E0)
+    background = ClayTealWallMid,
+    onBackground = ClayTextCream,
+    surface = ClayPeach,
+    onSurface = ClayDeepTealInk,
+    surfaceVariant = ClayVanilla,
+    onSurfaceVariant = ClayMutedInk,
+    outline = ClayPeachDeep
 )
 
 private val KinNestDarkColorScheme = darkColorScheme(
-    primary = StudioTeal,
-    onPrimary = Color(0xFF06252F),
-    primaryContainer = StudioTealDeep,
-    onPrimaryContainer = StudioTealSoft,
-    secondary = CoralSalmon,
-    onSecondary = Color(0xFF330F0F),
-    secondaryContainer = Color(0xFF5E2525),
-    onSecondaryContainer = CoralSalmonSoft,
-    tertiary = PowderSky,
-    onTertiary = Color(0xFF09243A),
-    tertiaryContainer = Color(0xFF1D4E72),
-    onTertiaryContainer = PowderSky,
-    error = Color(0xFFFF8A80),
-    onError = Color(0xFF450A0A),
+    primary = ClayCoralLight,
+    onPrimary = Color(0xFF42120E),
+    primaryContainer = Color(0xFF6B2823),
+    onPrimaryContainer = ClayPeachLight,
+    secondary = ClayAquaLight,
+    onSecondary = Color(0xFF0A3234),
+    secondaryContainer = Color(0xFF1F585C),
+    onSecondaryContainer = ClayVanillaLight,
+    tertiary = ClayHoneyLight,
+    onTertiary = Color(0xFF3E2204),
+    tertiaryContainer = Color(0xFF693E0A),
+    onTertiaryContainer = ClayVanillaLight,
+    error = ClayCoralLight,
+    onError = Color(0xFF42120E),
     background = DarkBackgroundTop,
     onBackground = DarkOnSurface,
     surface = DarkSurfaceClay,
     onSurface = DarkOnSurface,
-    surfaceVariant = Color(0xFF1A364B),
+    surfaceVariant = Color(0xFF2B6469),
     onSurfaceVariant = DarkOnSurfaceMuted,
-    outline = Color(0xFF355970)
+    outline = Color(0xFF569599)
 )
 
 val KinNestShapes = Shapes(
-    small = RoundedCornerShape(16.dp),
-    medium = RoundedCornerShape(24.dp),
-    large = RoundedCornerShape(28.dp),
-    extraLarge = RoundedCornerShape(36.dp)
+    small = RoundedCornerShape(20.dp),
+    medium = RoundedCornerShape(28.dp),
+    large = RoundedCornerShape(34.dp),
+    extraLarge = RoundedCornerShape(40.dp)
 )
 
 @Composable

@@ -6,7 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,340 +16,558 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BluetoothAudio
+import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Hearing
+import androidx.compose.material.icons.rounded.PhoneInTalk
 import androidx.compose.material.icons.rounded.SpeakerPhone
-import androidx.compose.material.icons.rounded.VideoCall
+import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.data.local.UserProfileEntity
 import com.example.data.model.AudioRoute
 import com.example.data.model.BadgeElement
 import com.example.data.model.CallState
 import com.example.data.model.FamilyMemberId
 import com.example.data.model.MemberPresenceStatus
+import com.example.data.model.PresenceAvailability
 import com.example.data.model.UserSessionState
-import com.example.ui.components.EditorialSectionHeader
+import com.example.data.model.statusColor
+import com.example.ui.components.ClayTextOnLight
 import com.example.ui.components.FamilyMemberAvatar
-import com.example.ui.theme.CoralSalmon
-import com.example.ui.theme.CoralSalmonDeep
-import com.example.ui.theme.EmeraldAccept
+import com.example.ui.theme.ClayAqua
+import com.example.ui.theme.ClayAquaDeep
+import com.example.ui.theme.ClayCoral
+import com.example.ui.theme.ClayCoralDeep
+import com.example.ui.theme.ClayDeepTealInk
+import com.example.ui.theme.ClayHoney
+import com.example.ui.theme.ClayHoneyDeep
+import com.example.ui.theme.ClayMutedInk
+import com.example.ui.theme.ClayPeach
+import com.example.ui.theme.ClaySage
+import com.example.ui.theme.ClaySageDeep
+import com.example.ui.theme.ClayTealShadow
+import com.example.ui.theme.ClayTextCream
+import com.example.ui.theme.ClayVanilla
+import com.example.ui.theme.ClayVanillaLight
 import com.example.ui.theme.LocalKinNestAccessibility
-import com.example.ui.theme.OchreGold
-import com.example.ui.theme.OchreGoldBright
-import com.example.ui.theme.PowderSkyDeep
-import com.example.ui.theme.StudioTeal
-import com.example.ui.theme.StudioTealDeep
+import com.example.ui.theme.clayDisc3D
 import com.example.ui.theme.clayPressScale
+import com.example.ui.theme.claymorphic
 
+/**
+ * Page 2 — 50/50 Video Call & Voice Call Launcher (NO top page title!).
+ * Styled strictly in the Pixar 3D Matte Clay theme with live Supabase Realtime
+ * 'Online' / 'Away' / 'Busy' presence status for Mithun, Mafitha, and Zayn!
+ */
 @Composable
 fun CallLauncherScreen(
     session: UserSessionState,
     callState: CallState,
     profiles: List<UserProfileEntity>,
     memberPresence: Map<FamilyMemberId, MemberPresenceStatus>,
-    onStartThreeWayCall: () -> Unit,
-    onStartOneOnOneCall: (FamilyMemberId) -> Unit,
+    onCycleMyPresenceStatus: () -> Unit,
+    onStartGroupVideoCall: () -> Unit,
+    onStartIndividualVideoCall: (FamilyMemberId) -> Unit,
+    onStartGroupVoiceCall: () -> Unit,
+    onStartIndividualVoiceCall: (FamilyMemberId) -> Unit,
     onCycleAudioRoute: () -> Unit
 ) {
-    val a11y = LocalKinNestAccessibility.current
     val self = session.deviceOwner ?: session.activeMember ?: FamilyMemberId.MITHUN
     val otherMembers = FamilyMemberId.entries.filterNot { it == self }
+    val a11y = LocalKinNestAccessibility.current
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+    val (audioLabel, audioIcon) = when (callState.audioRoute) {
+        AudioRoute.SPEAKER -> "Speaker" to Icons.Rounded.SpeakerPhone
+        AudioRoute.BLUETOOTH -> "Bluetooth" to Icons.Rounded.BluetoothAudio
+        AudioRoute.EARPIECE -> "Ear" to Icons.Rounded.Hearing
+    }
+
+    val onlineCount = memberPresence.values.count { it.availability == PresenceAvailability.ONLINE }
+    val groupAvailability = when {
+        memberPresence.values.any { it.availability == PresenceAvailability.ONLINE } -> PresenceAvailability.ONLINE
+        memberPresence.values.any { it.availability == PresenceAvailability.BUSY } -> PresenceAvailability.BUSY
+        memberPresence.values.any { it.availability == PresenceAvailability.AWAY } -> PresenceAvailability.AWAY
+        else -> PresenceAvailability.OFFLINE
+    }
+    val groupStatusLabel = when {
+        onlineCount >= 2 -> "$onlineCount Online"
+        onlineCount == 1 -> "1 Online"
+        else -> groupAvailability.label
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Group Video Call Section
-        item {
-            Column(
+        // Minimal Top Row (NO page name!) — Compact Live Presence Strip + 3D Clay Audio Output Toggle Pill
+        Row(
+            modifier = Modifier
+                .widthIn(max = 560.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            val myPresence = memberPresence[self] ?: MemberPresenceStatus(self)
+            Row(
                 modifier = Modifier
-                    .widthIn(max = 600.dp)
-                    .fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .height(42.dp)
+                    .clayPressScale(reducedMotion = a11y.reducedMotion)
+                    .claymorphic(
+                        cornerRadius = 21.dp,
+                        surfaceColor = ClayPeach,
+                        elevation = 8.dp,
+                        ledgeDepth = 3.5.dp
+                    )
+                    .clickable(onClick = onCycleMyPresenceStatus)
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 2.dp)
+                    .testTag("call_self_presence_toggle"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                EditorialSectionHeader(
-                    eyebrow = "Everyone Together",
-                    title = "Group Call",
-                    accentColor = StudioTealDeep
-                )
-
-                // Big Vibrant Group Call Button
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clayPressScale(reducedMotion = a11y.reducedMotion)
-                        .shadow(
-                            elevation = 16.dp,
-                            shape = RoundedCornerShape(32.dp),
-                            ambientColor = StudioTealDeep.copy(alpha = 0.45f),
-                            spotColor = EmeraldAccept.copy(alpha = 0.45f)
-                        )
-                        .clip(RoundedCornerShape(32.dp))
-                        .background(
-                            Brush.linearGradient(
-                                colors = listOf(StudioTealDeep, StudioTeal, EmeraldAccept)
-                            )
-                        )
-                        .border(
-                            width = 1.8.dp,
-                            color = Color.White.copy(alpha = 0.45f),
-                            shape = RoundedCornerShape(32.dp)
-                        )
-                        .clickable(onClick = onStartThreeWayCall)
-                        .padding(horizontal = 22.dp, vertical = 22.dp)
-                        .testTag("launch_3way_call_button")
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Mini overlapping family trio avatars
-                            Box(modifier = Modifier.height(42.dp)) {
-                                FamilyMemberId.entries.forEachIndexed { idx, member ->
-                                    val prof = profiles.firstOrNull { it.memberId == member.name }
-                                    FamilyMemberAvatar(
-                                        member = member,
-                                        customPhotoUri = prof?.customPhotoUri,
-                                        size = 40.dp,
-                                        showBadge = false,
-                                        isOnline = memberPresence[member]?.isOnline == true,
-                                        modifier = Modifier.offset(x = (idx * 28).dp)
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "Group Video Call",
-                                style = MaterialTheme.typography.headlineMedium.copy(
-                                    fontWeight = FontWeight.ExtraBold
-                                ),
-                                color = Color.White
-                            )
-                            Text(
-                                text = "Vapi • Ummi • Zayn live together",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color.White.copy(alpha = 0.92f)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        Box(
-                            modifier = Modifier
-                                .size(68.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.24f))
-                                .border(2.dp, Color.White.copy(alpha = 0.65f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Groups,
-                                contentDescription = "Start group family video call",
-                                tint = Color.White,
-                                modifier = Modifier.size(36.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Simple Colorful Individual Call Buttons
-        item {
-            Column(
-                modifier = Modifier
-                    .widthIn(max = 600.dp)
-                    .fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                EditorialSectionHeader(
-                    eyebrow = "1-on-1 Live Video",
-                    title = "Individual Call",
-                    accentColor = CoralSalmonDeep
+                        .size(9.dp)
+                        .clip(CircleShape)
+                        .background(myPresence.availability.statusColor())
+                        .border(1.4.dp, Color.White, CircleShape)
                 )
+                ClayTextOnLight(
+                    text = "${self.displayName.substringBefore(" ")} • ${myPresence.shortBadgeLabel()}",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.ExtraBold
+                    ),
+                    textColor = ClayDeepTealInk,
+                    depthDp = 0.7.dp,
+                    maxLines = 1
+                )
+            }
 
-                otherMembers.forEach { target ->
-                    val prof = profiles.firstOrNull { it.memberId == target.name }
-                    val badge = runCatching {
-                        BadgeElement.valueOf(prof?.badgeElement ?: BadgeElement.STARLIGHT.name)
-                    }.getOrDefault(BadgeElement.STARLIGHT)
-                    val presence = memberPresence[target]
-                    val isOnline = presence?.isOnline == true
+            Spacer(modifier = Modifier.width(8.dp))
 
-                    val (gradientColors, contentColor) = when (target) {
-                        FamilyMemberId.MITHUN -> listOf(Color(0xFF1D6FA5), PowderSkyDeep) to Color.White
-                        FamilyMemberId.MAFITHA -> listOf(CoralSalmonDeep, CoralSalmon) to Color.White
-                        FamilyMemberId.ZAYN -> listOf(OchreGold, OchreGoldBright) to Color(0xFF0D1B2A)
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clayPressScale(reducedMotion = a11y.reducedMotion)
-                            .shadow(
-                                elevation = 12.dp,
-                                shape = RoundedCornerShape(28.dp),
-                                ambientColor = gradientColors.first().copy(alpha = 0.42f),
-                                spotColor = gradientColors.first().copy(alpha = 0.42f)
-                            )
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(Brush.horizontalGradient(gradientColors))
-                            .border(
-                                width = 1.5.dp,
-                                color = Color.White.copy(alpha = 0.45f),
-                                shape = RoundedCornerShape(28.dp)
-                            )
-                            .clickable { onStartOneOnOneCall(target) }
-                            .padding(horizontal = 18.dp, vertical = 18.dp)
-                            .testTag("call_1on1_${target.name.lowercase()}")
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            FamilyMemberAvatar(
-                                member = target,
-                                customPhotoUri = prof?.customPhotoUri,
-                                badge = badge,
-                                size = 64.dp,
-                                isOnline = isOnline
-                            )
-                            Spacer(modifier = Modifier.width(14.dp))
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(
-                                    text = "Call ${target.displayName}",
-                                    style = MaterialTheme.typography.titleLarge.copy(
-                                        fontWeight = FontWeight.ExtraBold
-                                    ),
-                                    color = contentColor
-                                )
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = if (contentColor == Color.White) {
-                                        Color.Black.copy(alpha = 0.18f)
-                                    } else {
-                                        Color.White.copy(alpha = 0.52f)
-                                    }
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(8.dp)
-                                                .clip(CircleShape)
-                                                .background(if (isOnline) EmeraldAccept else Color(0xFFCBD5E1))
-                                        )
-                                        Text(
-                                            text = if (isOnline) "${target.title} • Online" else "${target.title} • Offline",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = contentColor
-                                        )
-                                    }
-                                }
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .size(56.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        if (contentColor == Color.White) {
-                                            Color.White.copy(alpha = 0.24f)
-                                        } else {
-                                            Color(0xFF0D1B2A).copy(alpha = 0.14f)
-                                        }
-                                    )
-                                    .border(
-                                        width = 1.5.dp,
-                                        color = contentColor.copy(alpha = 0.45f),
-                                        shape = CircleShape
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.VideoCall,
-                                    contentDescription = "Video call ${target.displayName}",
-                                    tint = contentColor,
-                                    modifier = Modifier.size(30.dp)
-                                )
-                            }
-                        }
-                    }
-                }
+            Row(
+                modifier = Modifier
+                    .height(42.dp)
+                    .clayPressScale(reducedMotion = a11y.reducedMotion)
+                    .claymorphic(
+                        cornerRadius = 21.dp,
+                        surfaceColor = ClayVanillaLight,
+                        elevation = 8.dp,
+                        ledgeDepth = 3.5.dp
+                    )
+                    .clickable(onClick = onCycleAudioRoute)
+                    .padding(horizontal = 14.dp)
+                    .padding(bottom = 2.dp)
+                    .testTag("cycle_audio_route_button"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = audioIcon,
+                    contentDescription = "Switch call audio output",
+                    tint = ClayAquaDeep,
+                    modifier = Modifier.size(18.dp)
+                )
+                ClayTextOnLight(
+                    text = audioLabel,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.ExtraBold
+                    ),
+                    textColor = ClayDeepTealInk,
+                    depthDp = 0.8.dp
+                )
             }
         }
 
-        // Simple Audio Output Toggle Pill
-        item {
-            val (audioLabel, audioIcon, audioBg) = when (callState.audioRoute) {
-                AudioRoute.SPEAKER -> Triple("Sound: Speaker", Icons.Rounded.SpeakerPhone, StudioTealDeep)
-                AudioRoute.BLUETOOTH -> Triple("Sound: Bluetooth", Icons.Rounded.BluetoothAudio, PowderSkyDeep)
-                AudioRoute.EARPIECE -> Triple("Sound: Phone Ear", Icons.Rounded.Hearing, Color(0xFF334155))
-            }
-
-            Surface(
-                shape = RoundedCornerShape(22.dp),
-                color = audioBg,
-                shadowElevation = 6.dp,
-                modifier = Modifier
-                    .widthIn(max = 600.dp)
-                    .fillMaxWidth()
-                    .height(54.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .clickable(onClick = onCycleAudioRoute)
-                    .testTag("cycle_audio_route_button")
+        // =====================================================================
+        // TOP HALF (50%) — VIDEO CALL (Warm Peach-Cream 3D Matte Clay Slab)
+        // =====================================================================
+        Box(
+            modifier = Modifier
+                .widthIn(max = 560.dp)
+                .fillMaxWidth()
+                .weight(1f)
+                .claymorphic(
+                    cornerRadius = 34.dp,
+                    surfaceColor = ClayPeach,
+                    elevation = 16.dp,
+                    shadowTint = ClayTealShadow,
+                    ledgeDepth = 7.dp
+                )
+                .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 18.dp)
+                .testTag("video_call_half_section")
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clayDisc3D(
+                                surfaceColor = ClayCoral,
+                                elevation = 8.dp,
+                                ledgeDepth = 3.5.dp
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Videocam,
+                            contentDescription = "Video Call",
+                            tint = ClayTextCream,
+                            modifier = Modifier
+                                .offset(y = (-1).dp)
+                                .size(23.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        ClayTextOnLight(
+                            text = "Video Call",
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 23.sp
+                            ),
+                            textColor = ClayCoralDeep,
+                            depthDp = 1.6.dp
+                        )
+                        ClayTextOnLight(
+                            text = "See smiles live on camera",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            textColor = ClayDeepTealInk,
+                            depthDp = 0.7.dp
+                        )
+                    }
+                }
+
+                // 3 Compact, Sculpted 3D Clay Squircle Video Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = audioIcon,
-                        contentDescription = "Switch call audio output",
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
+                    CompactStudioClayCallTile(
+                        title = "All 3",
+                        statusSubtitle = groupStatusLabel,
+                        clayColor = ClayAqua,
+                        badgeIcon = Icons.Rounded.Groups,
+                        member = null,
+                        profile = null,
+                        availability = groupAvailability,
+                        callTypeIcon = Icons.Rounded.Videocam,
+                        testTag = "launch_3way_call_button",
+                        modifier = Modifier.weight(1f),
+                        onClick = onStartGroupVideoCall
                     )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = audioLabel,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color.White
+
+                    otherMembers.forEachIndexed { idx, target ->
+                        val prof = profiles.firstOrNull { it.memberId == target.name }
+                        val presence = memberPresence[target] ?: MemberPresenceStatus(target)
+                        val clayTint = if (idx == 0) ClayCoral else ClayHoney
+                        CompactStudioClayCallTile(
+                            title = target.displayName.substringBefore(" "),
+                            statusSubtitle = presence.shortBadgeLabel(),
+                            clayColor = clayTint,
+                            badgeIcon = null,
+                            member = target,
+                            profile = prof,
+                            availability = presence.availability,
+                            callTypeIcon = Icons.Rounded.Videocam,
+                            testTag = "call_1on1_${target.name.lowercase()}",
+                            modifier = Modifier.weight(1f),
+                            onClick = { onStartIndividualVideoCall(target) }
+                        )
+                    }
+                }
+            }
+        }
+
+        // =====================================================================
+        // BOTTOM HALF (50%) — VOICE CALL (Warm Vanilla-Cream 3D Matte Clay Slab)
+        // =====================================================================
+        Box(
+            modifier = Modifier
+                .widthIn(max = 560.dp)
+                .fillMaxWidth()
+                .weight(1f)
+                .claymorphic(
+                    cornerRadius = 34.dp,
+                    surfaceColor = ClayVanilla,
+                    elevation = 16.dp,
+                    shadowTint = ClayTealShadow,
+                    ledgeDepth = 7.dp
+                )
+                .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 18.dp)
+                .testTag("voice_call_half_section")
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clayDisc3D(
+                                surfaceColor = ClayAqua,
+                                elevation = 8.dp,
+                                ledgeDepth = 3.5.dp
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PhoneInTalk,
+                            contentDescription = "Voice Call",
+                            tint = ClayTextCream,
+                            modifier = Modifier
+                                .offset(y = (-1).dp)
+                                .size(22.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        ClayTextOnLight(
+                            text = "Voice Call",
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 23.sp
+                            ),
+                            textColor = ClayDeepTealInk,
+                            depthDp = 1.6.dp
+                        )
+                        ClayTextOnLight(
+                            text = "Quick audio chat without video",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            textColor = ClayMutedInk,
+                            depthDp = 0.7.dp
+                        )
+                    }
+                }
+
+                // 3 Compact, Sculpted 3D Clay Squircle Voice Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CompactStudioClayCallTile(
+                        title = "All 3",
+                        statusSubtitle = groupStatusLabel,
+                        clayColor = ClayHoney,
+                        badgeIcon = Icons.Rounded.Groups,
+                        member = null,
+                        profile = null,
+                        availability = groupAvailability,
+                        callTypeIcon = Icons.Rounded.Call,
+                        testTag = "launch_3way_voice_call_button",
+                        modifier = Modifier.weight(1f),
+                        onClick = onStartGroupVoiceCall
+                    )
+
+                    otherMembers.forEachIndexed { idx, target ->
+                        val prof = profiles.firstOrNull { it.memberId == target.name }
+                        val presence = memberPresence[target] ?: MemberPresenceStatus(target)
+                        val clayTint = if (idx == 0) ClaySage else ClayAqua
+                        CompactStudioClayCallTile(
+                            title = target.displayName.substringBefore(" "),
+                            statusSubtitle = presence.shortBadgeLabel(),
+                            clayColor = clayTint,
+                            badgeIcon = null,
+                            member = target,
+                            profile = prof,
+                            availability = presence.availability,
+                            callTypeIcon = Icons.Rounded.Call,
+                            testTag = "voice_call_1on1_${target.name.lowercase()}",
+                            modifier = Modifier.weight(1f),
+                            onClick = { onStartIndividualVoiceCall(target) }
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(2.dp))
+    }
+}
+
+/**
+ * Compact, Super-Attractive 3D Matte Clay Call Button Tile with live Supabase Realtime
+ * 'Online' / 'Away' / 'Busy' / 'Offline' presence badge underneath.
+ */
+@Composable
+private fun CompactStudioClayCallTile(
+    title: String,
+    statusSubtitle: String,
+    clayColor: Color,
+    badgeIcon: ImageVector?,
+    member: FamilyMemberId?,
+    profile: UserProfileEntity?,
+    availability: PresenceAvailability,
+    callTypeIcon: ImageVector,
+    testTag: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val a11y = LocalKinNestAccessibility.current
+    val badge = runCatching {
+        BadgeElement.valueOf(profile?.badgeElement ?: BadgeElement.STARLIGHT.name)
+    }.getOrDefault(BadgeElement.STARLIGHT)
+    val dotColor = availability.statusColor()
+    val statusInk = when (availability) {
+        PresenceAvailability.ONLINE -> ClaySageDeep
+        PresenceAvailability.AWAY -> ClayHoneyDeep
+        PresenceAvailability.BUSY -> ClayCoralDeep
+        PresenceAvailability.OFFLINE -> ClayMutedInk
+    }
+
+    Column(
+        modifier = modifier
+            .clayPressScale(reducedMotion = a11y.reducedMotion)
+            .clickable(onClick = onClick)
+            .testTag(testTag),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(92.dp)
+                .claymorphic(
+                    cornerRadius = 26.dp,
+                    surfaceColor = clayColor,
+                    elevation = 12.dp,
+                    shadowTint = ClayTealShadow,
+                    ledgeDepth = 5.dp
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            if (member != null) {
+                FamilyMemberAvatar(
+                    member = member,
+                    customPhotoUri = profile?.customPhotoUri,
+                    badge = badge,
+                    size = 54.dp,
+                    showBadge = false,
+                    availability = availability,
+                    modifier = Modifier.offset(y = (-2).dp)
+                )
+            } else if (badgeIcon != null) {
+                Box(
+                    modifier = Modifier
+                        .offset(y = (-2).dp)
+                        .size(54.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.25f))
+                        .border(1.8.dp, Color.White.copy(alpha = 0.85f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = badgeIcon,
+                        contentDescription = null,
+                        tint = Color(0x3616484C),
+                        modifier = Modifier
+                            .offset(y = 1.8.dp)
+                            .size(31.dp)
+                    )
+                    Icon(
+                        imageVector = badgeIcon,
+                        contentDescription = title,
+                        tint = ClayTextCream,
+                        modifier = Modifier.size(31.dp)
+                    )
+                }
+            }
+
+            // Crisp Cream Corner Call-Type Emblem
+            Surface(
+                shape = CircleShape,
+                color = ClayVanillaLight,
+                shadowElevation = 5.dp,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 7.dp, bottom = 9.dp)
+                    .size(24.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = callTypeIcon,
+                        contentDescription = null,
+                        tint = clayColor,
+                        modifier = Modifier.size(14.dp)
                     )
                 }
             }
         }
 
-        item { Spacer(modifier = Modifier.height(16.dp)) }
+        // Crisp 100% Legible Deep-Teal Name + Live Online/Away/Busy Status Underneath
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(7.5.dp)
+                        .clip(CircleShape)
+                        .background(dotColor)
+                        .border(1.dp, Color.White, CircleShape)
+                )
+                ClayTextOnLight(
+                    text = title,
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 13.5.sp
+                    ),
+                    textColor = ClayDeepTealInk,
+                    depthDp = 1.dp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center
+                )
+            }
+            ClayTextOnLight(
+                text = statusSubtitle,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 10.5.sp
+                ),
+                textColor = statusInk,
+                depthDp = 0.5.dp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }

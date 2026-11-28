@@ -2,8 +2,10 @@ package com.example.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -13,6 +15,8 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,7 +26,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -30,6 +33,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.automirrored.rounded.NavigateBefore
 import androidx.compose.material.icons.automirrored.rounded.NavigateNext
 import androidx.compose.material.icons.rounded.CameraAlt
@@ -37,14 +41,15 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -62,6 +67,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -70,51 +76,69 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.example.data.local.FamilyActivityEntity
 import com.example.data.local.UserProfileEntity
+import com.example.data.model.BadgeElement
 import com.example.data.model.FamilyMemberId
 import com.example.data.model.LiveStroke
 import com.example.data.model.UserSessionState
 import com.example.data.model.VoiceLanguage
 import com.example.security.ParentalAuthManager
 import com.example.ui.components.ClayActionButton
-import com.example.ui.theme.BubblePink
-import com.example.ui.theme.ConstellationGold
-import com.example.ui.theme.CrimsonDecline
-import com.example.ui.theme.ElectricRocket
-import com.example.ui.theme.EmeraldAccept
-import com.example.ui.theme.MintTreehouseDeep
-import com.example.ui.theme.PurpleChest
-import com.example.ui.theme.WalkieAmber
+import com.example.ui.components.ClayCircleButton
+import com.example.ui.components.ClayTextOnLight
+import com.example.ui.components.FamilyMemberAvatar
+import com.example.ui.components.Text3D
+import com.example.ui.theme.ClayAqua
+import com.example.ui.theme.ClayAquaDeep
+import com.example.ui.theme.ClayCocoaInk
+import com.example.ui.theme.ClayCoral
+import com.example.ui.theme.ClayCoralDeep
+import com.example.ui.theme.ClayDeepTealInk
+import com.example.ui.theme.ClayHoney
+import com.example.ui.theme.ClayHoneyDeep
+import com.example.ui.theme.ClayMutedInk
+import com.example.ui.theme.ClayPeach
+import com.example.ui.theme.ClayPeachDeep
+import com.example.ui.theme.ClaySage
+import com.example.ui.theme.ClayTealShadow
+import com.example.ui.theme.ClayTextCream
+import com.example.ui.theme.ClayVanilla
+import com.example.ui.theme.ClayVanillaDeep
+import com.example.ui.theme.ClayVanillaLight
+import com.example.ui.theme.clayDisc3D
 import com.example.ui.theme.claymorphic
 
 @Composable
-private fun SubScreenTopBar(title: String, onBack: () -> Unit) {
+private fun SubScreenTopBar(onBack: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 2.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(
-            onClick = onBack,
-            modifier = Modifier
-                .size(52.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surface)
-                .testTag("subscreen_back_button")
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                contentDescription = "Back"
-            )
-        }
-        Spacer(modifier = Modifier.width(12.dp))
-        Text(
-            text = title,
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.onBackground
+        ClayCircleButton(
+            icon = Icons.AutoMirrored.Rounded.ArrowBack,
+            contentDescription = "Back",
+            clayColor = ClayPeach,
+            iconTint = ClayDeepTealInk,
+            size = 48.dp,
+            testTag = "subscreen_back_button",
+            onClick = onBack
         )
     }
 }
+
+@Composable
+private fun clayLightFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = ClayDeepTealInk,
+    unfocusedTextColor = ClayDeepTealInk,
+    focusedBorderColor = ClayAqua,
+    unfocusedBorderColor = ClayPeachDeep,
+    focusedLabelColor = ClayAquaDeep,
+    unfocusedLabelColor = ClayMutedInk,
+    cursorColor = ClayCoral,
+    focusedContainerColor = ClayVanillaLight,
+    unfocusedContainerColor = ClayVanillaLight.copy(alpha = 0.9f)
+)
 
 /**
  * Synchronized Multiplayer Vector Sketching Canvas.
@@ -130,12 +154,12 @@ fun LiveDrawingBoardScreen(
     BackHandler { onBack() }
 
     val palette = listOf(
-        BubblePink,
-        ElectricRocket,
-        MintTreehouseDeep,
-        ConstellationGold,
-        PurpleChest,
-        Color(0xFF0F172A)
+        ClayCoral,
+        ClayAqua,
+        ClaySage,
+        ClayHoney,
+        ClayDeepTealInk,
+        ClayCocoaInk
     )
     var selectedColor by remember { mutableStateOf(palette.first()) }
     val activePoints = remember { mutableStateListOf<Pair<Float, Float>>() }
@@ -144,16 +168,25 @@ fun LiveDrawingBoardScreen(
         modifier = Modifier
             .fillMaxSize()
             .safeDrawingPadding()
-            .padding(12.dp),
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        SubScreenTopBar(title = "Live Drawing Board", onBack = onBack)
+        SubScreenTopBar(onBack = onBack)
 
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .claymorphic(cornerRadius = 30.dp, surfaceColor = Color.White, elevation = 12.dp)
+                .claymorphic(
+                    cornerRadius = 30.dp,
+                    surfaceColor = ClayVanillaLight,
+                    elevation = 14.dp,
+                    shadowTint = ClayTealShadow,
+                    ledgeDepth = 6.dp
+                )
+                .padding(6.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color.White)
         ) {
             Canvas(
                 modifier = Modifier
@@ -200,11 +233,12 @@ fun LiveDrawingBoardScreen(
             }
 
             if (strokes.isEmpty() && activePoints.isEmpty()) {
-                Text(
-                    text = "Draw together! Every stroke syncs across all 3 family screens.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = Color(0xFF64748B),
+                ClayTextOnLight(
+                    text = "Draw together! Every stroke syncs across all 3 screens.",
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                    textColor = ClayMutedInk,
                     textAlign = TextAlign.Center,
+                    depthDp = 1.dp,
                     modifier = Modifier
                         .align(Alignment.Center)
                         .padding(32.dp)
@@ -213,20 +247,30 @@ fun LiveDrawingBoardScreen(
         }
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .claymorphic(
+                    cornerRadius = 24.dp,
+                    surfaceColor = ClayPeach,
+                    elevation = 10.dp,
+                    ledgeDepth = 4.dp
+                )
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
             palette.forEach { swatch ->
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(swatch)
-                        .border(
-                            width = if (selectedColor == swatch) 4.dp else 0.dp,
-                            color = Color.White,
-                            shape = CircleShape
+                        .size(42.dp)
+                        .clayDisc3D(
+                            surfaceColor = swatch,
+                            elevation = if (selectedColor == swatch) 10.dp else 5.dp,
+                            ledgeDepth = 3.dp
+                        )
+                        .then(
+                            if (selectedColor == swatch) Modifier.border(3.dp, ClayVanillaLight, CircleShape)
+                            else Modifier
                         )
                         .clickable { selectedColor = swatch }
                 )
@@ -239,15 +283,15 @@ fun LiveDrawingBoardScreen(
         ) {
             ClayActionButton(
                 text = "Clear",
-                containerColor = CrimsonDecline,
+                containerColor = ClayCoral,
                 icon = Icons.Rounded.Clear,
                 testTag = "drawing_clear_button",
                 modifier = Modifier.weight(1f),
                 onClick = onClearBoard
             )
             ClayActionButton(
-                text = "Save Capsule",
-                containerColor = EmeraldAccept,
+                text = "Save",
+                containerColor = ClaySage,
                 icon = Icons.Rounded.Save,
                 testTag = "drawing_save_button",
                 modifier = Modifier.weight(1f),
@@ -311,18 +355,20 @@ fun StoryTogetherScreen(
         verticalArrangement = Arrangement.SpaceBetween,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        SubScreenTopBar(title = "Story Together", onBack = onBack)
+        SubScreenTopBar(onBack = onBack)
 
         Box(
             modifier = Modifier
                 .widthIn(max = 560.dp)
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(vertical = 12.dp)
+                .padding(vertical = 14.dp)
                 .claymorphic(
                     cornerRadius = 32.dp,
-                    surfaceColor = MaterialTheme.colorScheme.surface,
-                    elevation = 12.dp
+                    surfaceColor = ClayPeach,
+                    elevation = 16.dp,
+                    shadowTint = ClayTealShadow,
+                    ledgeDepth = 8.dp
                 )
                 .padding(24.dp),
             contentAlignment = Alignment.Center
@@ -331,26 +377,49 @@ fun StoryTogetherScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Text(text = current.emoji, fontSize = 72.sp)
-                Text(
-                    text = current.title,
-                    style = MaterialTheme.typography.headlineMedium,
-                    textAlign = TextAlign.Center
-                )
-                Text(
-                    text = if (voiceLanguage == VoiceLanguage.MALAYALAM) current.malayalam else current.english,
-                    style = MaterialTheme.typography.bodyLarge,
-                    textAlign = TextAlign.Center
-                )
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MintTreehouseDeep.copy(alpha = 0.14f)
+                Box(
+                    modifier = Modifier
+                        .size(110.dp)
+                        .clayDisc3D(
+                            surfaceColor = ClayVanillaLight,
+                            elevation = 10.dp,
+                            ledgeDepth = 4.dp
+                        ),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "Page ${pageIndex + 1} of ${pages.size} • Synced for all 3",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MintTreehouseDeep,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    Text(text = current.emoji, fontSize = 58.sp)
+                }
+
+                ClayTextOnLight(
+                    text = current.title,
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.ExtraBold),
+                    textColor = ClayDeepTealInk,
+                    textAlign = TextAlign.Center,
+                    depthDp = 1.6.dp
+                )
+
+                ClayTextOnLight(
+                    text = if (voiceLanguage == VoiceLanguage.MALAYALAM) current.malayalam else current.english,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                    textColor = ClayCocoaInk,
+                    textAlign = TextAlign.Center,
+                    depthDp = 1.dp
+                )
+
+                Box(
+                    modifier = Modifier
+                        .claymorphic(
+                            cornerRadius = 18.dp,
+                            surfaceColor = ClayAqua,
+                            elevation = 6.dp,
+                            ledgeDepth = 3.dp
+                        )
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Text3D(
+                        text = "Page ${pageIndex + 1} of ${pages.size} • Synced",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold),
+                        depthDp = 1.2.dp
                     )
                 }
             }
@@ -364,7 +433,7 @@ fun StoryTogetherScreen(
         ) {
             ClayActionButton(
                 text = "Read Aloud (${voiceLanguage.label})",
-                containerColor = WalkieAmber,
+                containerColor = ClayHoney,
                 icon = Icons.Rounded.VolumeUp,
                 testTag = "story_narrate_button",
                 modifier = Modifier.fillMaxWidth(),
@@ -372,11 +441,11 @@ fun StoryTogetherScreen(
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 ClayActionButton(
                     text = "Prev",
-                    containerColor = PurpleChest,
+                    containerColor = ClayAqua,
                     icon = Icons.AutoMirrored.Rounded.NavigateBefore,
                     testTag = "story_prev_button",
                     modifier = Modifier.weight(1f),
@@ -384,7 +453,7 @@ fun StoryTogetherScreen(
                 )
                 ClayActionButton(
                     text = "Next",
-                    containerColor = ElectricRocket,
+                    containerColor = ClaySage,
                     icon = Icons.AutoMirrored.Rounded.NavigateNext,
                     testTag = "story_next_button",
                     modifier = Modifier.weight(1f),
@@ -430,14 +499,21 @@ fun AdventureMissionScreen(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        SubScreenTopBar(title = "Camera Treasure Hunt", onBack = onBack)
+        SubScreenTopBar(onBack = onBack)
 
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(30.dp))
-                .background(Color(0xFF0F172A))
+                .claymorphic(
+                    cornerRadius = 30.dp,
+                    surfaceColor = ClayPeach,
+                    elevation = 14.dp,
+                    ledgeDepth = 6.dp
+                )
+                .padding(6.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xFF15383C))
         ) {
             if (hasCameraPerm) {
                 CameraXLivePreview(
@@ -450,49 +526,61 @@ fun AdventureMissionScreen(
                         .align(Alignment.Center)
                         .padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.CameraAlt,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(56.dp)
-                    )
-                    Text(
+                    Box(
+                        modifier = Modifier
+                            .size(84.dp)
+                            .clayDisc3D(surfaceColor = ClayPeach, elevation = 10.dp, ledgeDepth = 4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.CameraAlt,
+                            contentDescription = null,
+                            tint = ClayAquaDeep,
+                            modifier = Modifier.size(40.dp)
+                        )
+                    }
+                    Text3D(
                         text = "Turn on the camera to start Zayn's Treasure Hunt!",
                         style = MaterialTheme.typography.titleLarge,
-                        color = Color.White,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        depthDp = 2.dp
                     )
                     ClayActionButton(
                         text = "Allow Camera",
-                        containerColor = PurpleChest,
+                        containerColor = ClayAqua,
                         testTag = "ar_allow_camera_button",
                         onClick = { launcher.launch(Manifest.permission.CAMERA) }
                     )
                 }
             }
 
-            // AR Scanner HUD Overlay
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(16.dp)
+                    .padding(14.dp)
                     .fillMaxWidth()
-                    .claymorphic(cornerRadius = 24.dp, surfaceColor = Color.White.copy(alpha = 0.92f))
-                    .padding(16.dp)
+                    .claymorphic(
+                        cornerRadius = 22.dp,
+                        surfaceColor = ClayVanilla,
+                        elevation = 10.dp,
+                        ledgeDepth = 4.dp
+                    )
+                    .padding(14.dp)
             ) {
-                Text(
+                ClayTextOnLight(
                     text = clues[clueIndex],
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color(0xFF1E1B4B)
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                    textColor = ClayDeepTealInk,
+                    depthDp = 1.2.dp
                 )
             }
         }
 
         ClayActionButton(
             text = if (clueIndex < clues.lastIndex) "Clue Found! Next Clue 🎉" else "Mission Complete! +25 Stars 🌟",
-            containerColor = EmeraldAccept,
+            containerColor = ClaySage,
             icon = Icons.Rounded.CheckCircle,
             testTag = "ar_clue_found_button",
             modifier = Modifier.fillMaxWidth(),
@@ -509,13 +597,17 @@ fun AdventureMissionScreen(
 }
 
 /**
- * PIN / Biometric-Gated Parent Corner & Mithun + Mafitha's Household Ledger.
+ * Gear Hub (Settings & Profile Edit):
+ * Smooth Pixar-style 3D Matte Clay cards (Warm Peach-Cream & Vanilla-Cream)
+ * with guaranteed-legible Deep-Teal / Cocoa 3D typography and sculpted Aqua / Coral / Honey / Sage buttons.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ParentalSettingsScreen(
     session: UserSessionState,
     profiles: List<UserProfileEntity>,
     parentLogs: List<FamilyActivityEntity>,
+    onCustomizeMyProfile: (BadgeElement, String?) -> Unit,
     onUnlockWithPin: (String) -> Boolean,
     onBiometricUnlocked: () -> Unit,
     onUpdatePin: (String) -> Unit,
@@ -524,94 +616,31 @@ fun ParentalSettingsScreen(
     onToggleDarkMode: (Boolean?) -> Unit,
     onReassignDeviceOwner: (FamilyMemberId) -> Unit,
     onAddParentLog: (title: String, note: String, cost: String) -> Unit,
-    onLockAndBack: () -> Unit
+    onLockAndBack: () -> Unit,
+    onSignOut: () -> Unit
 ) {
     BackHandler { onLockAndBack() }
 
     val context = LocalContext.current
-    var pinInput by remember { mutableStateOf("") }
-    var newPinInput by remember { mutableStateOf("") }
+    val selfMember = session.deviceOwner ?: session.activeMember ?: FamilyMemberId.MITHUN
+    val selfProfile = profiles.firstOrNull { it.memberId == selfMember.name }
+    val currentBadge = runCatching {
+        BadgeElement.valueOf(selfProfile?.badgeElement ?: BadgeElement.ROCKET.name)
+    }.getOrDefault(BadgeElement.ROCKET)
 
-    if (!session.isParentalUnlocked) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .safeDrawingPadding()
-                .padding(24.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                modifier = Modifier
-                    .widthIn(max = 460.dp)
-                    .fillMaxWidth()
-                    .claymorphic(
-                        cornerRadius = 30.dp,
-                        surfaceColor = MaterialTheme.colorScheme.surface,
-                        elevation = 14.dp
-                    )
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Lock,
-                    contentDescription = "Parental Lock",
-                    tint = PurpleChest,
-                    modifier = Modifier.size(54.dp)
-                )
-                Text("Mithun & Mafitha Only", style = MaterialTheme.typography.headlineMedium)
-                Text(
-                    text = "Unlock with Biometrics or Family PIN (default: 2468)",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-                OutlinedTextField(
-                    value = pinInput,
-                    onValueChange = { pinInput = it.filter(Char::isDigit).take(6) },
-                    label = { Text("Enter Family PIN") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("parent_pin_input")
-                )
-                ClayActionButton(
-                    text = "Unlock with PIN",
-                    containerColor = PurpleChest,
-                    testTag = "parent_unlock_pin_button",
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = { onUnlockWithPin(pinInput) }
-                )
-                if (ParentalAuthManager.canUseBiometrics(context) && context is FragmentActivity) {
-                    ClayActionButton(
-                        text = "Use Fingerprint / Face",
-                        containerColor = MintTreehouseDeep,
-                        icon = Icons.Rounded.Fingerprint,
-                        testTag = "parent_biometric_button",
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            ParentalAuthManager.showBiometricPrompt(
-                                activity = context,
-                                onSuccess = onBiometricUnlocked,
-                                onFallbackToPin = {}
-                            )
-                        }
-                    )
-                }
-                ClayActionButton(
-                    text = "Back",
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                    testTag = "parent_gate_back_button",
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = onLockAndBack
-                )
-            }
-        }
-        return
+    var selectedBadge by remember(selfMember, currentBadge) { mutableStateOf(currentBadge) }
+    var pickedPhotoUri by remember(selfMember, selfProfile?.customPhotoUri) {
+        mutableStateOf(selfProfile?.customPhotoUri)
     }
 
+    val photoPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        uri?.let { pickedPhotoUri = it.toString() }
+    }
+
+    var pinInput by remember { mutableStateOf("") }
+    var newPinInput by remember { mutableStateOf("") }
     var newLogTitle by remember { mutableStateOf("") }
     var newLogCost by remember { mutableStateOf("") }
 
@@ -619,94 +648,478 @@ fun ParentalSettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .safeDrawingPadding(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        item { SubScreenTopBar(title = "Vapi & Ummi's Corner", onBack = onLockAndBack) }
+        item {
+            Box(modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth()) {
+                SubScreenTopBar(onBack = onLockAndBack)
+            }
+        }
 
-        // Comfort & Accessibility Controls
+        // 1. Style Your Look — Warm Peach-Cream 3D Matte Clay Card
         item {
             Box(
                 modifier = Modifier
+                    .widthIn(max = 560.dp)
                     .fillMaxWidth()
-                    .claymorphic(cornerRadius = 26.dp, surfaceColor = MaterialTheme.colorScheme.surface)
-                    .padding(16.dp)
+                    .claymorphic(
+                        cornerRadius = 30.dp,
+                        surfaceColor = ClayPeach,
+                        elevation = 16.dp,
+                        shadowTint = ClayTealShadow,
+                        ledgeDepth = 8.dp
+                    )
+                    .padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 22.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Family Comfort & Accessibility", style = MaterialTheme.typography.titleLarge)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Quiet Hours (Gentle Chimes)", modifier = Modifier.weight(1f))
-                        Switch(checked = session.quietHoursEnabled, onCheckedChange = onToggleQuietHours)
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    ClayTextOnLight(
+                        text = "Style Your Look (${selfMember.displayName})",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold),
+                        textColor = ClayDeepTealInk,
+                        depthDp = 1.5.dp,
+                        textAlign = TextAlign.Center
+                    )
+
+                    FamilyMemberAvatar(
+                        member = selfMember,
+                        customPhotoUri = pickedPhotoUri,
+                        badge = selectedBadge,
+                        size = 88.dp,
+                        isOnline = true
+                    )
+
+                    ClayActionButton(
+                        text = "Pick My Profile Photo",
+                        containerColor = ClayHoney,
+                        icon = Icons.Rounded.PhotoLibrary,
+                        testTag = "pick_avatar_photo_button",
+                        modifier = Modifier.fillMaxWidth(),
+                        minHeight = 50.dp,
+                        onClick = {
+                            photoPicker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        }
+                    )
+
+                    ClayTextOnLight(
+                        text = "Choose Your Fun Badge",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold),
+                        textColor = ClayCocoaInk,
+                        depthDp = 1.dp,
+                        modifier = Modifier.align(Alignment.Start)
+                    )
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        BadgeElement.entries.forEach { badge ->
+                            val isSelected = selectedBadge == badge
+                            Box(
+                                modifier = Modifier
+                                    .claymorphic(
+                                        cornerRadius = 18.dp,
+                                        surfaceColor = if (isSelected) ClayCoral else ClayVanillaLight,
+                                        elevation = if (isSelected) 8.dp else 4.dp,
+                                        ledgeDepth = if (isSelected) 4.dp else 2.5.dp
+                                    )
+                                    .clickable { selectedBadge = badge }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                if (isSelected) {
+                                    Text3D(
+                                        text = "${badge.emoji} ${badge.label}",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold),
+                                        depthDp = 1.1.dp
+                                    )
+                                } else {
+                                    ClayTextOnLight(
+                                        text = "${badge.emoji} ${badge.label}",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold),
+                                        textColor = ClayDeepTealInk,
+                                        depthDp = 0.8.dp
+                                    )
+                                }
+                            }
+                        }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Reduced Motion", modifier = Modifier.weight(1f))
-                        Switch(checked = session.reducedMotionEnabled, onCheckedChange = onToggleReducedMotion)
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Force Dark Cosmos Theme", modifier = Modifier.weight(1f))
-                        Switch(
-                            checked = session.darkModeOverride == true,
-                            onCheckedChange = { onToggleDarkMode(if (it) true else null) }
+
+                    ClayActionButton(
+                        text = "Save My Look",
+                        containerColor = ClaySage,
+                        icon = Icons.Rounded.Save,
+                        testTag = "save_avatar_style_button",
+                        modifier = Modifier.fillMaxWidth(),
+                        minHeight = 52.dp,
+                        onClick = { onCustomizeMyProfile(selectedBadge, pickedPhotoUri) }
+                    )
+                }
+            }
+        }
+
+        // 2. Account / Sign Out — Warm Vanilla-Cream 3D Matte Clay Card
+        item {
+            Box(
+                modifier = Modifier
+                    .widthIn(max = 560.dp)
+                    .fillMaxWidth()
+                    .claymorphic(
+                        cornerRadius = 28.dp,
+                        surfaceColor = ClayVanilla,
+                        elevation = 14.dp,
+                        shadowTint = ClayTealShadow,
+                        ledgeDepth = 7.dp
+                    )
+                    .padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 22.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ClayTextOnLight(
+                        text = "Account & Switch User",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                        textColor = ClayDeepTealInk,
+                        depthDp = 1.4.dp
+                    )
+                    ClayTextOnLight(
+                        text = "Signed in as ${selfMember.displayName} (${selfMember.title}). Sign out to log in with another username & password.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        textColor = ClayCocoaInk,
+                        depthDp = 0.8.dp
+                    )
+                    ClayActionButton(
+                        text = "Sign Out / Switch User",
+                        containerColor = ClayCoral,
+                        icon = Icons.AutoMirrored.Rounded.Logout,
+                        testTag = "settings_sign_out_button",
+                        modifier = Modifier.fillMaxWidth(),
+                        minHeight = 50.dp,
+                        onClick = onSignOut
+                    )
+                }
+            }
+        }
+
+        // 3. PIN / Biometric-Gated Vapi & Ummi's Grown-Up Corner
+        if (!session.isParentalUnlocked) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .widthIn(max = 560.dp)
+                        .fillMaxWidth()
+                        .claymorphic(
+                            cornerRadius = 30.dp,
+                            surfaceColor = ClayPeach,
+                            elevation = 16.dp,
+                            shadowTint = ClayTealShadow,
+                            ledgeDepth = 8.dp
+                        )
+                        .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(58.dp)
+                            .clayDisc3D(surfaceColor = ClayHoney, elevation = 8.dp, ledgeDepth = 3.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Lock,
+                            contentDescription = "Parental Lock",
+                            tint = ClayTextCream,
+                            modifier = Modifier.size(28.dp)
                         )
                     }
-                    Row(
+                    ClayTextOnLight(
+                        text = "Vapi & Ummi's Grown-Up Corner",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold),
+                        textColor = ClayDeepTealInk,
+                        depthDp = 1.5.dp,
+                        textAlign = TextAlign.Center
+                    )
+                    ClayTextOnLight(
+                        text = "Unlock with Biometrics or Family PIN (default: 2468)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        textColor = ClayCocoaInk,
+                        depthDp = 0.8.dp,
+                        textAlign = TextAlign.Center
+                    )
+                    OutlinedTextField(
+                        value = pinInput,
+                        onValueChange = { pinInput = it.filter(Char::isDigit).take(6) },
+                        label = { Text("Enter Family PIN") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(20.dp),
+                        colors = clayLightFieldColors(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("parent_pin_input")
+                    )
+                    ClayActionButton(
+                        text = "Unlock Parent Controls",
+                        containerColor = ClayAqua,
+                        testTag = "parent_unlock_pin_button",
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                        minHeight = 50.dp,
+                        onClick = { onUnlockWithPin(pinInput) }
+                    )
+                    if (ParentalAuthManager.canUseBiometrics(context) && context is FragmentActivity) {
+                        ClayActionButton(
+                            text = "Use Fingerprint / Face",
+                            containerColor = ClaySage,
+                            icon = Icons.Rounded.Fingerprint,
+                            testTag = "parent_biometric_button",
+                            modifier = Modifier.fillMaxWidth(),
+                            minHeight = 50.dp,
+                            onClick = {
+                                ParentalAuthManager.showBiometricPrompt(
+                                    activity = context,
+                                    onSuccess = onBiometricUnlocked,
+                                    onFallbackToPin = {}
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+        } else {
+            // Comfort & Accessibility Controls
+            item {
+                Box(
+                    modifier = Modifier
+                        .widthIn(max = 560.dp)
+                        .fillMaxWidth()
+                        .claymorphic(
+                            cornerRadius = 28.dp,
+                            surfaceColor = ClayPeach,
+                            elevation = 16.dp,
+                            shadowTint = ClayTealShadow,
+                            ledgeDepth = 8.dp
+                        )
+                        .padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 22.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ClayTextOnLight(
+                            text = "Family Comfort & Controls",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold),
+                            textColor = ClayDeepTealInk,
+                            depthDp = 1.5.dp
+                        )
+                        val switchColors = SwitchDefaults.colors(
+                            checkedThumbColor = ClayVanillaLight,
+                            checkedTrackColor = ClaySage,
+                            uncheckedThumbColor = ClayVanillaLight,
+                            uncheckedTrackColor = ClayPeachDeep
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            ClayTextOnLight(
+                                text = "Quiet Hours (Gentle Chimes)",
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                                textColor = ClayCocoaInk,
+                                modifier = Modifier.weight(1f),
+                                depthDp = 0.9.dp
+                            )
+                            Switch(checked = session.quietHoursEnabled, onCheckedChange = onToggleQuietHours, colors = switchColors)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            ClayTextOnLight(
+                                text = "Reduced Motion",
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                                textColor = ClayCocoaInk,
+                                modifier = Modifier.weight(1f),
+                                depthDp = 0.9.dp
+                            )
+                            Switch(checked = session.reducedMotionEnabled, onCheckedChange = onToggleReducedMotion, colors = switchColors)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            ClayTextOnLight(
+                                text = "Twilight Clay Dark Mode",
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                                textColor = ClayCocoaInk,
+                                modifier = Modifier.weight(1f),
+                                depthDp = 0.9.dp
+                            )
+                            Switch(
+                                checked = session.darkModeOverride == true,
+                                onCheckedChange = { onToggleDarkMode(if (it) true else null) },
+                                colors = switchColors
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = newPinInput,
+                                onValueChange = { newPinInput = it.filter(Char::isDigit).take(6) },
+                                label = { Text("New PIN (4+ digits)") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(20.dp),
+                                colors = clayLightFieldColors(),
+                                modifier = Modifier.weight(1f)
+                            )
+                            ClayActionButton(
+                                text = "Set",
+                                containerColor = ClaySage,
+                                testTag = "save_new_pin_button",
+                                minHeight = 52.dp,
+                                onClick = {
+                                    if (newPinInput.length >= 4) {
+                                        onUpdatePin(newPinInput)
+                                        newPinInput = ""
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Quick Phone Owner Switch (Parent-only)
+            item {
+                val currentOwner = session.deviceOwner ?: session.activeMember ?: FamilyMemberId.MITHUN
+                Box(
+                    modifier = Modifier
+                        .widthIn(max = 560.dp)
+                        .fillMaxWidth()
+                        .claymorphic(
+                            cornerRadius = 28.dp,
+                            surfaceColor = ClayVanilla,
+                            elevation = 14.dp,
+                            shadowTint = ClayTealShadow,
+                            ledgeDepth = 7.dp
+                        )
+                        .padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 22.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ClayTextOnLight(
+                            text = "Quick Member Override",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                            textColor = ClayDeepTealInk,
+                            depthDp = 1.4.dp
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FamilyMemberId.entries.forEach { member ->
+                                val isAssigned = member == currentOwner
+                                ClayActionButton(
+                                    text = member.title,
+                                    containerColor = if (isAssigned) ClaySage else ClayAqua,
+                                    testTag = "reassign_device_${member.name.lowercase()}",
+                                    modifier = Modifier.weight(1f),
+                                    minHeight = 48.dp,
+                                    onClick = { onReassignDeviceOwner(member) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Parent-Only Classified Grown-Up Log
+            item {
+                Box(
+                    modifier = Modifier
+                        .widthIn(max = 560.dp)
+                        .fillMaxWidth()
+                        .claymorphic(
+                            cornerRadius = 28.dp,
+                            surfaceColor = ClayPeach,
+                            elevation = 14.dp,
+                            shadowTint = ClayTealShadow,
+                            ledgeDepth = 7.dp
+                        )
+                        .padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 22.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ClayTextOnLight(
+                            text = "Vapi & Ummi's Classified Log",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold),
+                            textColor = ClayDeepTealInk,
+                            depthDp = 1.5.dp
+                        )
                         OutlinedTextField(
-                            value = newPinInput,
-                            onValueChange = { newPinInput = it.filter(Char::isDigit).take(6) },
-                            label = { Text("New PIN (4+ digits)") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
+                            value = newLogTitle,
+                            onValueChange = { newLogTitle = it },
+                            label = { Text("Task / Note") },
+                            shape = RoundedCornerShape(20.dp),
+                            colors = clayLightFieldColors(),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = newLogCost,
+                            onValueChange = { newLogCost = it },
+                            label = { Text("Expense Split / Verdict") },
+                            shape = RoundedCornerShape(20.dp),
+                            colors = clayLightFieldColors(),
+                            modifier = Modifier.fillMaxWidth()
                         )
                         ClayActionButton(
-                            text = "Set",
-                            containerColor = MintTreehouseDeep,
-                            testTag = "save_new_pin_button",
+                            text = "Add to Grown-Up Log",
+                            containerColor = ClayAqua,
+                            testTag = "add_parent_ledger_button",
+                            modifier = Modifier.fillMaxWidth(),
+                            minHeight = 50.dp,
                             onClick = {
-                                if (newPinInput.length >= 4) {
-                                    onUpdatePin(newPinInput)
-                                    newPinInput = ""
+                                if (newLogTitle.isNotBlank()) {
+                                    onAddParentLog(
+                                        newLogTitle.trim(),
+                                        "Filed under Vapi & Ummi notes.",
+                                        newLogCost.ifBlank { "50/50 split" }
+                                    )
+                                    newLogTitle = ""
+                                    newLogCost = ""
                                 }
                             }
                         )
                     }
                 }
             }
-        }
 
-        // Equipment-Assigned Phone Owner (Safe reassignment only inside PIN-protected Parent Corner)
-        item {
-            val currentOwner = session.deviceOwner ?: session.activeMember ?: FamilyMemberId.MITHUN
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .claymorphic(cornerRadius = 26.dp, surfaceColor = MaterialTheme.colorScheme.surface)
-                    .padding(16.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Phone Owner Assignment", style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        text = "This phone always stays signed in as ${currentOwner.displayName} (${currentOwner.title}). Tap below only if you are handing this phone to another family member.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FamilyMemberId.entries.forEach { member ->
-                            val isAssigned = member == currentOwner
-                            ClayActionButton(
-                                text = member.title,
-                                containerColor = if (isAssigned) EmeraldAccept else MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = if (isAssigned) Color.White else MaterialTheme.colorScheme.onSurface,
-                                testTag = "reassign_device_${member.name.lowercase()}",
-                                modifier = Modifier.weight(1f),
-                                minHeight = 48.dp,
-                                onClick = { onReassignDeviceOwner(member) }
+            items(parentLogs, key = { it.id }) { log ->
+                Box(
+                    modifier = Modifier
+                        .widthIn(max = 560.dp)
+                        .fillMaxWidth()
+                        .claymorphic(
+                            cornerRadius = 22.dp,
+                            surfaceColor = ClayVanilla,
+                            elevation = 8.dp,
+                            shadowTint = ClayTealShadow,
+                            ledgeDepth = 5.dp
+                        )
+                        .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        ClayTextOnLight(
+                            text = log.title,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                            textColor = ClayDeepTealInk,
+                            depthDp = 1.2.dp
+                        )
+                        ClayTextOnLight(
+                            text = log.subtitle,
+                            style = MaterialTheme.typography.bodyMedium,
+                            textColor = ClayCocoaInk,
+                            depthDp = 0.8.dp
+                        )
+                        log.costEstimate?.let {
+                            ClayTextOnLight(
+                                text = it,
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold),
+                                textColor = ClayCoralDeep,
+                                depthDp = 0.9.dp
                             )
                         }
                     }
@@ -714,81 +1127,6 @@ fun ParentalSettingsScreen(
             }
         }
 
-        // Playful Satirical Parent-Only Household Log & Expense Splitter
-        item {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .claymorphic(cornerRadius = 26.dp, surfaceColor = Color(0xFFFFF7ED))
-                    .padding(16.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Mithun & Mafitha's Classified Grown-Up Log",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = Color(0xFF9A3412)
-                    )
-                    Text(
-                        text = "100% hidden from Zayn Adam. Sarcasm & sneaky snack splits welcome.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color(0xFFC2410C)
-                    )
-                    OutlinedTextField(
-                        value = newLogTitle,
-                        onValueChange = { newLogTitle = it },
-                        label = { Text("Task / Sarcastic Note") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = newLogCost,
-                        onValueChange = { newLogCost = it },
-                        label = { Text("Expense Split / Dramatic Verdict") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    ClayActionButton(
-                        text = "Add to Classified Ledger",
-                        containerColor = WalkieAmber,
-                        testTag = "add_parent_ledger_button",
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            if (newLogTitle.isNotBlank()) {
-                                onAddParentLog(
-                                    newLogTitle.trim(),
-                                    "Filed under dubious domestic negotiations.",
-                                    newLogCost.ifBlank { "50/50 split" }
-                                )
-                                newLogTitle = ""
-                                newLogCost = ""
-                            }
-                        }
-                    )
-                }
-            }
-        }
-
-        items(parentLogs, key = { it.id }) { log ->
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .claymorphic(cornerRadius = 20.dp, surfaceColor = MaterialTheme.colorScheme.surface)
-                    .padding(14.dp)
-            ) {
-                Column {
-                    Text(log.title, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        log.subtitle,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    log.costEstimate?.let {
-                        Text(
-                            text = it,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = WalkieAmber
-                        )
-                    }
-                }
-            }
-        }
+        item { Spacer(modifier = Modifier.height(18.dp)) }
     }
 }

@@ -18,6 +18,7 @@ import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.storage.Storage
@@ -29,6 +30,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.io.ByteArrayOutputStream
 import java.io.File
 
@@ -127,6 +130,18 @@ data class SupabaseCapsuleDto(
     val created_at_ms: Long
 )
 
+@Serializable
+data class SupabaseLoginResultDto(
+    val member_id: String,
+    val username: String,
+    val display_name: String
+)
+
+sealed class FamilyLoginResult {
+    data class Success(val member: FamilyMemberId, val username: String) : FamilyLoginResult()
+    data class Failure(val reason: String) : FamilyLoginResult()
+}
+
 interface SyncRepository {
     fun isSupabaseConfigured(): Boolean
     fun observeMessages(threadId: String): Flow<List<EncryptedMessageEntity>>
@@ -209,6 +224,49 @@ class KinNestSyncRepository(
             }
         }
         return Result.success(Unit)
+    }
+
+    // --- 0. Secure Username & Password Authentication via Supabase RPC ---
+
+    suspend fun verifyFamilyLogin(
+        username: String,
+        password: String
+    ): FamilyLoginResult = withContext(Dispatchers.IO) {
+        val cleanUser = username.trim()
+        if (cleanUser.isEmpty() || password.isEmpty()) {
+            return@withContext FamilyLoginResult.Failure("Please enter both your username and password.")
+        }
+        val client = supabaseClient
+            ?: return@withContext FamilyLoginResult.Failure("Supabase backend is not configured yet.")
+
+        runCatching {
+            val rows = client.postgrest.rpc(
+                function = RPC_VERIFY_LOGIN,
+                parameters = buildJsonObject {
+                    put("p_username", cleanUser)
+                    put("p_password", password)
+                }
+            ).decodeList<SupabaseLoginResultDto>()
+
+            val matched = rows.firstOrNull()
+                ?: return@withContext FamilyLoginResult.Failure("Incorrect username or password.")
+
+            val member = runCatching { FamilyMemberId.valueOf(matched.member_id) }.getOrNull()
+                ?: return@withContext FamilyLoginResult.Failure("Account profile is not recognized.")
+
+            FamilyLoginResult.Success(member = member, username = matched.username)
+        }.getOrElse { error ->
+            val msg = error.message.orEmpty()
+            val friendly = when {
+                msg.contains("verify_family_login", ignoreCase = true) ||
+                    msg.contains("42883") ||
+                    msg.contains("Could not find the function", ignoreCase = true) ->
+                    "Login function not set up in Supabase yet. Run the login SQL in Supabase SQL Editor."
+                else ->
+                    "Couldn't reach Supabase. Check your internet connection and try again."
+            }
+            FamilyLoginResult.Failure(friendly)
+        }
     }
 
     // --- 1. Supabase Storage Uploads (Profile Pics, Voice Notes, Chat Photos/Videos) ---
@@ -539,6 +597,7 @@ class KinNestSyncRepository(
 
     companion object {
         private const val MEDIA_BUCKET = "family-media"
+        private const val RPC_VERIFY_LOGIN = "verify_family_login"
         private const val TABLE_PROFILES = "family_profiles"
         private const val TABLE_MESSAGES = "family_messages"
         private const val TABLE_XOXO = "xoxo_games"

@@ -20,14 +20,18 @@ sealed interface KinNestRoute {
     data object ParentalSettings : KinNestRoute
 }
 
+/**
+ * 4 fun, 6-year-old-friendly workspace pages matching Holy Moly !
+ */
 enum class WorkspaceTab(
     val index: Int,
     val label: String,
+    val funTitle: String,
     val accessibleTitle: String,
     val malayalamLabel: String
 ) {
-    HOME(0, "A12 E", "A12 E Home", "വീട്"),
-    CALL(1, "C4L L", "Family Video Call", "വിളി"),
-    CHAT(2, "T4L K", "Family Chat", "സന്ദേശം"),
-    PLAY(3, "P1A Y", "XOXO Game", "കളി")
+    HOME(0, "Buzz", "Buzz Box", "Buzz Box Walkie Talkie", "ബസ്"),
+    CALL(1, "Ring", "Ring Ring", "Ring Ring Video and Voice Calls", "വിളി"),
+    CHAT(2, "Chatter", "Chatter Box", "Chatter Box Family Chat", "വർത്തമാനം"),
+    PLAY(3, "Play", "Play Zone", "Play Zone XOXO Game", "കളി")
 }

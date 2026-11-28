@@ -2,12 +2,19 @@ package com.example.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -18,49 +25,40 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.VideoCall
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +69,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -80,450 +80,312 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.data.local.UserProfileEntity
-import com.example.data.model.BadgeElement
 import com.example.data.model.FamilyMemberId
 import com.example.data.model.MemberPresenceStatus
+import com.example.data.model.PresenceAvailability
 import com.example.data.model.UserSessionState
-import com.example.data.model.haloColor
-import com.example.ui.components.ClayActionButton
-import com.example.ui.components.FamilyMemberAvatar
-import com.example.ui.theme.CoralSalmon
-import com.example.ui.theme.CoralSalmonDeep
+import com.example.data.model.statusColor
+import com.example.ui.components.ClayCircleButton
+import com.example.ui.components.ClayTextOnLight
+import com.example.ui.components.Text3D
+import com.example.ui.theme.ClayAqua
+import com.example.ui.theme.ClayAquaDeep
+import com.example.ui.theme.ClayAquaLight
+import com.example.ui.theme.ClayCocoaInk
+import com.example.ui.theme.ClayCoral
+import com.example.ui.theme.ClayCoralDeep
+import com.example.ui.theme.ClayCoralLight
+import com.example.ui.theme.ClayDeepTealInk
+import com.example.ui.theme.ClayHoney
+import com.example.ui.theme.ClayHoneyDeep
+import com.example.ui.theme.ClayHoneyLight
+import com.example.ui.theme.ClayMutedInk
+import com.example.ui.theme.ClayPeach
+import com.example.ui.theme.ClayPeachDeep
+import com.example.ui.theme.ClayPeachLight
+import com.example.ui.theme.ClaySage
+import com.example.ui.theme.ClaySageDeep
+import com.example.ui.theme.ClaySageLight
+import com.example.ui.theme.ClayTealShadow
+import com.example.ui.theme.ClayTextCream
+import com.example.ui.theme.ClayVanilla
+import com.example.ui.theme.ClayVanillaDeep
+import com.example.ui.theme.ClayVanillaLight
 import com.example.ui.theme.EmeraldAccept
 import com.example.ui.theme.LocalKinNestAccessibility
-import com.example.ui.theme.OchreGoldBright
-import com.example.ui.theme.StudioTeal
-import com.example.ui.theme.StudioTealDeep
-import com.example.ui.theme.WalkieAmberDeep
-import com.example.ui.theme.liquidGlass
+import com.example.ui.theme.claymorphic
+import com.example.ui.theme.pastelRecessedWell
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.sin
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+/**
+ * Page 1 — Authentic Retro Pixar 3D Matte Clay Portable Radio with Kid-Friendly
+ * Vintage Landline Rotary Dial Unlock Puzzle & Physical 3D Pop-Up Hold-To-Talk Plunger!
+ * No top page title; clean live family presence pills + Honey-Gold 3D Gear button.
+ */
 @Composable
 fun HomeTreehouseScreen(
     session: UserSessionState,
     profiles: List<UserProfileEntity>,
     memberPresence: Map<FamilyMemberId, MemberPresenceStatus>,
     isWalkieRecording: Boolean,
-    onCallSpecificMember: (FamilyMemberId) -> Unit,
-    onCustomizeMyProfile: (BadgeElement, String?) -> Unit,
+    onSelectPresenceStatus: (PresenceAvailability) -> Unit,
     onWalkiePressStart: () -> Unit,
     onWalkiePressRelease: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val a11y = LocalKinNestAccessibility.current
     val selfMember = session.deviceOwner ?: session.activeMember ?: FamilyMemberId.MITHUN
-    val selfProfile = profiles.firstOrNull { it.memberId == selfMember.name }
-    val selfBadge = runCatching {
-        BadgeElement.valueOf(selfProfile?.badgeElement ?: BadgeElement.ROCKET.name)
-    }.getOrDefault(BadgeElement.ROCKET)
     val selfPresence = memberPresence[selfMember]
     val selfIsOnline = selfPresence?.isOnline == true
-
-    var showCustomizeSelfSheet by remember { mutableStateOf(false) }
-    var inspectedMember by remember { mutableStateOf<FamilyMemberId?>(null) }
+    val selfAvailability = selfPresence?.availability ?: PresenceAvailability.OFFLINE
+    var showStatusPicker by remember { mutableStateOf(false) }
 
     val audioPermLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { _ -> }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 14.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 1. "This Phone" Identity & Live Family Online Presence Card
-        item {
-            Box(
-                modifier = Modifier
-                    .widthIn(max = 600.dp)
-                    .fillMaxWidth()
-                    .liquidGlass(
-                        shape = RoundedCornerShape(28.dp),
-                        surfaceAlpha = 0.84f,
-                        tintColor = MaterialTheme.colorScheme.surface,
-                        reducedMotion = a11y.reducedMotion,
-                        cornerRadius = 28.dp
-                    )
-                    .padding(16.dp)
-                    .testTag("home_identity_presence_card")
+        // Top Row (NO page name!) — Live Supabase Realtime Presence Cards (Mithun, Mafitha, Zayn) + Gear Button
+        Row(
+            modifier = Modifier
+                .widthIn(max = 520.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.weight(1f)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .clickable { showCustomizeSelfSheet = true }
-                                .testTag("home_self_avatar_button")
-                        ) {
-                            FamilyMemberAvatar(
-                                member = selfMember,
-                                customPhotoUri = selfProfile?.customPhotoUri,
-                                badge = selfBadge,
-                                size = 58.dp,
-                                isOnline = selfIsOnline
+                FamilyMemberId.entries.forEach { member ->
+                    val status = memberPresence[member] ?: MemberPresenceStatus(member)
+                    val availability = status.availability
+                    val dotColor = availability.statusColor()
+                    val isSelf = member == selfMember
+                    val shortName = member.displayName.substringBefore(" ")
+                    val statusText = status.shortBadgeLabel()
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .weight(1f)
+                            .claymorphic(
+                                cornerRadius = 18.dp,
+                                surfaceColor = if (isSelf) ClayVanillaLight else ClayPeach,
+                                elevation = 7.dp,
+                                ledgeDepth = 3.dp
                             )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (selfIsOnline) EmeraldAccept.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(7.dp)
-                                            .clip(CircleShape)
-                                            .background(if (selfIsOnline) EmeraldAccept else Color(0xFF94A3B8))
-                                    )
-                                    Text(
-                                        text = "THIS PHONE • ${selfMember.title.uppercase()}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (selfIsOnline) EmeraldAccept else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                            .then(
+                                if (isSelf) {
+                                    Modifier.clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        showStatusPicker = !showStatusPicker
+                                    }
+                                } else {
+                                    Modifier
                                 }
-                            }
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Hi, ${selfMember.displayName}",
-                                style = MaterialTheme.typography.headlineMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            .padding(horizontal = 6.dp, vertical = 5.dp)
+                            .testTag("presence_card_${member.name.lowercase()}")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.5.dp)
+                                    .clip(CircleShape)
+                                    .background(dotColor)
+                                    .border(1.2.dp, Color.White, CircleShape)
+                            )
+                            ClayTextOnLight(
+                                text = shortName,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 11.5.sp
+                                ),
+                                textColor = if (isSelf) ClayDeepTealInk else ClayCocoaInk,
+                                depthDp = 0.7.dp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        IconButton(
-                            onClick = { showCustomizeSelfSheet = true },
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .testTag("edit_my_profile_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Edit,
-                                contentDescription = "Edit my photo and badge",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(19.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(6.dp))
-                        IconButton(
-                            onClick = onOpenSettings,
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(StudioTeal.copy(alpha = 0.16f))
-                                .testTag("home_settings_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Settings,
-                                contentDescription = "Device and family settings",
-                                tint = StudioTealDeep,
-                                modifier = Modifier.size(21.dp)
-                            )
-                        }
-                    }
-
-                    HorizontalDivider(
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.32f)
-                    )
-
-                    // Live Family Online Presence Strip (Tapping another avatar NEVER switches login)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FamilyMemberId.entries.forEach { member ->
-                            val isSelf = member == selfMember
-                            val prof = profiles.firstOrNull { it.memberId == member.name }
-                            val badge = runCatching {
-                                BadgeElement.valueOf(prof?.badgeElement ?: BadgeElement.STARLIGHT.name)
-                            }.getOrDefault(BadgeElement.STARLIGHT)
-                            val presence = memberPresence[member]
-                            val isMemberOnline = presence?.isOnline == true
-
-                            Surface(
-                                shape = RoundedCornerShape(20.dp),
-                                color = if (isSelf) {
-                                    member.haloColor().copy(alpha = 0.22f)
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.62f)
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .border(
-                                        width = if (isSelf) 1.5.dp else 1.dp,
-                                        color = if (isSelf) member.haloColor() else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
-                                        shape = RoundedCornerShape(20.dp)
-                                    )
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .clickable {
-                                        if (isSelf) {
-                                            showCustomizeSelfSheet = true
-                                        } else {
-                                            inspectedMember = member
-                                        }
-                                    }
-                                    .testTag("presence_chip_${member.name.lowercase()}")
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    FamilyMemberAvatar(
-                                        member = member,
-                                        customPhotoUri = prof?.customPhotoUri,
-                                        badge = badge,
-                                        size = 44.dp,
-                                        showBadge = false,
-                                        isOnline = isMemberOnline
-                                    )
-                                    Text(
-                                        text = if (isSelf) "${member.title} (You)" else member.title,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = if (isSelf) FontWeight.ExtraBold else FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(7.dp)
-                                                .clip(CircleShape)
-                                                .background(if (isMemberOnline) EmeraldAccept else Color(0xFF94A3B8))
-                                        )
-                                        Text(
-                                            text = if (isMemberOnline) "Online" else "Offline",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = if (isMemberOnline) EmeraldAccept else MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                        ClayTextOnLight(
+                            text = if (isSelf) "$statusText ▾" else statusText,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 9.5.sp
+                            ),
+                            textColor = when (availability) {
+                                PresenceAvailability.ONLINE -> ClaySageDeep
+                                PresenceAvailability.AWAY -> ClayHoneyDeep
+                                PresenceAvailability.BUSY -> ClayCoralDeep
+                                PresenceAvailability.OFFLINE -> ClayMutedInk
+                            },
+                            depthDp = 0.4.dp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
             }
-        }
 
-        // 2. Hero Retro-Modern Walkie-Talkie Handset ("HOLD TO TALK")
-        item {
-            WalkieTalkieHandset(
-                selfMember = selfMember,
-                isOnline = selfIsOnline,
-                isRecording = isWalkieRecording,
-                reducedMotion = a11y.reducedMotion,
-                onPressStart = {
-                    val hasPerm = ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.RECORD_AUDIO
-                    ) == PackageManager.PERMISSION_GRANTED
-                    if (!hasPerm) {
-                        audioPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                        false
-                    } else {
-                        onWalkiePressStart()
-                        true
-                    }
-                },
-                onPressRelease = onWalkiePressRelease,
-                modifier = Modifier
-                    .widthIn(max = 420.dp)
-                    .fillMaxWidth()
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Sculpted 3D Matte Clay Honey-Gold Gear Button
+            ClayCircleButton(
+                icon = Icons.Rounded.Settings,
+                contentDescription = "Open settings and profile editor",
+                clayColor = ClayHoney,
+                iconTint = ClayTextCream,
+                size = 48.dp,
+                testTag = "home_settings_button",
+                onClick = onOpenSettings
             )
         }
 
-        item { Spacer(modifier = Modifier.height(12.dp)) }
-    }
-
-    // Quick Video Call Dialog when tapping another family member's avatar (NEVER switches login)
-    inspectedMember?.let { member ->
-        val prof = profiles.firstOrNull { it.memberId == member.name }
-        val badge = runCatching {
-            BadgeElement.valueOf(prof?.badgeElement ?: BadgeElement.STARLIGHT.name)
-        }.getOrDefault(BadgeElement.STARLIGHT)
-        val presence = memberPresence[member]
-        val isOnline = presence?.isOnline == true
-
-        AlertDialog(
-            onDismissRequest = { inspectedMember = null },
-            icon = {
-                FamilyMemberAvatar(
-                    member = member,
-                    customPhotoUri = prof?.customPhotoUri,
-                    badge = badge,
-                    size = 72.dp,
-                    isOnline = isOnline
-                )
-            },
-            title = {
-                Text("${member.displayName} (${member.title})")
-            },
-            text = {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isOnline) EmeraldAccept.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceVariant
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(9.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isOnline) EmeraldAccept else Color(0xFF94A3B8))
-                            )
-                            Text(
-                                text = presence?.statusLabel(isSelf = false) ?: "Offline",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = if (isOnline) EmeraldAccept else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    ClayActionButton(
-                        text = "Video Call ${member.displayName}",
-                        containerColor = EmeraldAccept,
-                        icon = Icons.Rounded.VideoCall,
-                        testTag = "quick_call_${member.name.lowercase()}",
-                        modifier = Modifier.fillMaxWidth(),
-                        minHeight = 54.dp,
-                        onClick = {
-                            inspectedMember = null
-                            onCallSpecificMember(member)
-                        }
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { inspectedMember = null }) {
-                    Text("Close")
-                }
-            }
-        )
-    }
-
-    // Personalize ONLY your own profile photo & daily badge
-    if (showCustomizeSelfSheet) {
-        var selectedBadge by remember(selfMember) { mutableStateOf(selfBadge) }
-        var pickedPhotoUri by remember(selfMember) { mutableStateOf(selfProfile?.customPhotoUri) }
-
-        val photoPicker = rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.PickVisualMedia()
-        ) { uri: Uri? ->
-            uri?.let { pickedPhotoUri = it.toString() }
-        }
-
-        ModalBottomSheet(onDismissRequest = { showCustomizeSelfSheet = false }) {
-            Column(
+        // Expandable 1-Tap Self Status Switcher (Online / Away / Busy) synced live via Supabase Realtime
+        AnimatedVisibility(
+            visible = showStatusPicker,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            Row(
                 modifier = Modifier
+                    .widthIn(max = 520.dp)
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .padding(top = 6.dp, bottom = 2.dp, start = 2.dp, end = 2.dp)
+                    .claymorphic(
+                        cornerRadius = 20.dp,
+                        surfaceColor = ClayVanillaLight,
+                        elevation = 8.dp,
+                        ledgeDepth = 3.5.dp
+                    )
+                    .padding(horizontal = 10.dp, vertical = 7.dp)
+                    .testTag("presence_status_picker_bar"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Style Your Look (${selfMember.displayName})",
-                    style = MaterialTheme.typography.headlineMedium
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                FamilyMemberAvatar(
-                    member = selfMember,
-                    customPhotoUri = pickedPhotoUri,
-                    badge = selectedBadge,
-                    size = 92.dp,
-                    isOnline = selfIsOnline
-                )
-                Spacer(modifier = Modifier.height(14.dp))
-
-                ClayActionButton(
-                    text = "Pick My Photo",
-                    containerColor = selfMember.haloColor(),
-                    contentColor = Color(0xFF0D1B2A),
-                    icon = Icons.Rounded.PhotoLibrary,
-                    testTag = "pick_avatar_photo_button",
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = {
-                        photoPicker.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
+                listOf(
+                    PresenceAvailability.ONLINE,
+                    PresenceAvailability.AWAY,
+                    PresenceAvailability.BUSY
+                ).forEach { option ->
+                    val selected = selfAvailability == option
+                    val pillColor = when {
+                        selected && option == PresenceAvailability.ONLINE -> ClaySage
+                        selected && option == PresenceAvailability.AWAY -> ClayHoney
+                        selected && option == PresenceAvailability.BUSY -> ClayCoral
+                        else -> ClayPeach
                     }
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "CHOOSE DAILY ELEMENT BADGE",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.Start)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    BadgeElement.entries.forEach { badge ->
-                        FilterChip(
-                            selected = selectedBadge == badge,
-                            onClick = { selectedBadge = badge },
-                            label = { Text("${badge.emoji} ${badge.label}") }
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .claymorphic(
+                                cornerRadius = 15.dp,
+                                surfaceColor = pillColor,
+                                elevation = if (selected) 7.dp else 4.dp,
+                                ledgeDepth = if (selected) 3.dp else 2.dp
+                            )
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSelectPresenceStatus(option)
+                                showStatusPicker = false
+                            }
+                            .padding(horizontal = 8.dp, vertical = 7.dp)
+                            .testTag("set_status_${option.name.lowercase()}"),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(if (selected) ClayTextCream else option.statusColor())
+                                .border(1.dp, Color.White, CircleShape)
                         )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        if (selected) {
+                            Text3D(
+                                text = option.label,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 11.5.sp
+                                ),
+                                depthDp = 1.dp
+                            )
+                        } else {
+                            ClayTextOnLight(
+                                text = option.label,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 11.5.sp
+                                ),
+                                textColor = ClayDeepTealInk,
+                                depthDp = 0.6.dp
+                            )
+                        }
                     }
                 }
-                Spacer(modifier = Modifier.height(20.dp))
-                ClayActionButton(
-                    text = "Save My Look",
-                    containerColor = StudioTealDeep,
-                    testTag = "save_avatar_style_button",
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = {
-                        onCustomizeMyProfile(selectedBadge, pickedPhotoUri)
-                        showCustomizeSelfSheet = false
-                    }
-                )
-                Spacer(modifier = Modifier.height(24.dp))
             }
         }
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        // Full-Size Authentic Vintage 3D Clay Portable Radio with Rotary Dial Puzzle
+        AuthenticRetroClayRadio(
+            selfMember = selfMember,
+            isOnline = selfIsOnline,
+            isRecording = isWalkieRecording,
+            reducedMotion = a11y.reducedMotion,
+            onPressStart = {
+                val hasPerm = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+                if (!hasPerm) {
+                    audioPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    false
+                } else {
+                    onWalkiePressStart()
+                    true
+                }
+            },
+            onPressRelease = onWalkiePressRelease,
+            modifier = Modifier
+                .widthIn(max = 450.dp)
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(bottom = 2.dp)
+        )
     }
 }
 
-/**
- * Tactile Retro-Modern Family Walkie-Talkie Handset:
- * Features a sculpted stubby antenna, channel knob, perforated acoustic speaker grille,
- * backlit LCD channel readout with live transmit timer & audio bars, and a big recessed
- * rubber Push-To-Talk (PTT) button with glowing radio pulse rings.
- */
 @Composable
-private fun WalkieTalkieHandset(
+private fun AuthenticRetroClayRadio(
     selfMember: FamilyMemberId,
     isOnline: Boolean,
     isRecording: Boolean,
@@ -533,10 +395,34 @@ private fun WalkieTalkieHandset(
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+
+    // Radio Mechanical Puzzle State
+    var puzzleModeEnabled by remember { mutableStateOf(true) }
+    var isDialUnlocked by remember { mutableStateOf(false) }
+    var isSpinningAuto by remember { mutableStateOf(false) }
+    var justSentBurst by remember { mutableStateOf(false) }
+    var channelIndex by remember { mutableIntStateOf(0) }
+    var knobAngleTarget by remember { mutableFloatStateOf(0f) }
     var elapsedSec by remember { mutableIntStateOf(0) }
 
+    val rotaryAngle = remember { Animatable(0f) }
+    val lockedShake = remember { Animatable(0f) }
+
+    val channelPresets = remember {
+        listOf(
+            Triple("103.5", "FAMILY FM", 0.72f),
+            Triple("96.8", "ZAYN CLUB", 0.44f),
+            Triple("106.2", "SUPER HERO", 0.86f)
+        )
+    }
+    val activePreset = channelPresets[channelIndex % channelPresets.size]
+    val effectiveUnlocked = isDialUnlocked || !puzzleModeEnabled
+
+    // Live timer while transmitting
     LaunchedEffect(isRecording) {
         if (isRecording) {
+            justSentBurst = false
             elapsedSec = 0
             while (true) {
                 delay(1000L)
@@ -547,469 +433,1303 @@ private fun WalkieTalkieHandset(
         }
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "walkie_tx_anim")
+    // Gentle auto-reset back to Rotary Puzzle 3.2 seconds after sending a clip
+    LaunchedEffect(justSentBurst, puzzleModeEnabled, isRecording) {
+        if (justSentBurst && puzzleModeEnabled && !isRecording) {
+            delay(3200L)
+            justSentBurst = false
+            isDialUnlocked = false
+        }
+    }
+
+    // Smooth ambient animations
+    val infiniteTransition = rememberInfiniteTransition(label = "retro_radio_anim")
     val wavePhase by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 6.28318f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 900, easing = LinearEasing),
+            animation = tween(durationMillis = 760, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "walkie_wave_phase"
+        label = "radio_wave"
     )
-    val pulseRing by infiniteTransition.animateFloat(
+    val hintPulse by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200, easing = LinearEasing),
+            animation = tween(durationMillis = 1250, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "dial_hint_pulse"
+    )
+    val radioWaveRing by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1050, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "walkie_pulse_ring"
+        label = "broadcast_ring"
     )
-    val pttScale by animateFloatAsState(
-        targetValue = if (isRecording && !reducedMotion) 0.94f else 1f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = 500f),
-        label = "ptt_press_scale"
+
+    // Analog Tuning Needle position (sweeps live as the child rotates the landline wheel!)
+    val spinFraction = (rotaryAngle.value / 120f).coerceIn(0f, 1f)
+    val targetNeedlePos = when {
+        effectiveUnlocked -> activePreset.third
+        spinFraction > 0.02f -> 0.14f + spinFraction * (activePreset.third - 0.14f)
+        else -> 0.14f
+    }
+    val animatedNeedlePos by animateFloatAsState(
+        targetValue = targetNeedlePos,
+        animationSpec = spring(dampingRatio = 0.62f, stiffness = 260f),
+        label = "analog_needle_pos"
     )
+    val liveMhz = 88.0f + animatedNeedlePos * 20.0f
+
+    // Real 3D mechanical plunger elevation height (pops UP when unlocked, sinks DEEP when pressed!)
+    val plungerLiftDp by animateDpAsState(
+        targetValue = when {
+            isRecording -> 2.dp
+            effectiveUnlocked -> 13.dp
+            else -> 3.dp
+        },
+        animationSpec = spring(dampingRatio = 0.46f, stiffness = 420f),
+        label = "plunger_3d_lift"
+    )
+    val plungerScale by animateFloatAsState(
+        targetValue = when {
+            isRecording && !reducedMotion -> 0.94f
+            effectiveUnlocked && !reducedMotion -> 1.04f
+            else -> 0.96f
+        },
+        animationSpec = spring(dampingRatio = 0.52f, stiffness = 420f),
+        label = "plunger_scale"
+    )
+    val knobAngle by animateFloatAsState(
+        targetValue = knobAngleTarget,
+        animationSpec = spring(dampingRatio = 0.52f, stiffness = 360f),
+        label = "channel_knob_angle"
+    )
+
+    // Helper: Run a joyful animated rotary spin (for 6-year-old tap-assist!)
+    fun triggerGuidedRotarySpin() {
+        if (isSpinningAuto || effectiveUnlocked) return
+        scope.launch {
+            isSpinningAuto = true
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            // Spin clockwise to finger stop with tactile clicks
+            val steps = 5
+            for (s in 1..steps) {
+                rotaryAngle.animateTo(
+                    targetValue = (s / steps.toFloat()) * 124f,
+                    animationSpec = tween(durationMillis = 72, easing = LinearEasing)
+                )
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            }
+            // Unlock right as it hits the golden finger stop!
+            isDialUnlocked = true
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            // Realistic vintage landline spring-recoil back to 0°!
+            rotaryAngle.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = 0.58f,
+                    stiffness = 140f
+                )
+            )
+            isSpinningAuto = false
+        }
+    }
+
+    // Helper: Playful 3D locked wiggle if the child presses the center button before spinning
+    fun triggerLockedWiggle() {
+        scope.launch {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            lockedShake.snapTo(0f)
+            lockedShake.animateTo(11f, tween(55))
+            lockedShake.animateTo(-11f, tween(70))
+            lockedShake.animateTo(7f, tween(60))
+            lockedShake.animateTo(0f, spring(dampingRatio = 0.5f, stiffness = 500f))
+        }
+    }
 
     Column(
-        modifier = modifier.padding(horizontal = 6.dp),
+        modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Top Hardware Row: Stubby Rubber Antenna (left) + Rotary Channel Knob (right)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 34.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom
-        ) {
-            // Stubby Textured Radio Antenna
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    modifier = Modifier
-                        .width(18.dp)
-                        .height(52.dp)
-                        .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp, bottomStart = 3.dp, bottomEnd = 3.dp))
-                        .background(
-                            Brush.horizontalGradient(
-                                colors = listOf(Color(0xFF0A1620), Color(0xFF284354), Color(0xFF0C1A24))
-                            )
-                        )
-                        .border(
-                            width = 1.dp,
-                            color = Color.White.copy(alpha = 0.14f),
-                            shape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp, bottomStart = 3.dp, bottomEnd = 3.dp)
-                        )
-                ) {
-                    // Signal ring band on antenna tip
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = 8.dp)
-                            .fillMaxWidth()
-                            .height(5.dp)
-                            .background(if (isRecording) CoralSalmonDeep else OchreGoldBright)
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .width(28.dp)
-                        .height(10.dp)
-                        .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
-                        .background(Color(0xFF1A3140))
-                )
-            }
-
-            // Rotary Channel / Volume Knob + Mini Status Cap
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.Bottom
-            ) {
-                Box(
-                    modifier = Modifier
-                        .width(26.dp)
-                        .height(18.dp)
-                        .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
-                        .background(
-                            Brush.horizontalGradient(
-                                colors = listOf(Color(0xFF1A3140), Color(0xFF3E6478), Color(0xFF162834))
-                            )
-                        )
-                )
-                Box(
-                    modifier = Modifier
-                        .width(34.dp)
-                        .height(24.dp)
-                        .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-                        .background(
-                            Brush.horizontalGradient(
-                                colors = listOf(CoralSalmonDeep, Color(0xFFF98A54), WalkieAmberDeep)
-                            )
-                        )
-                        .border(
-                            width = 1.dp,
-                            color = Color.White.copy(alpha = 0.25f),
-                            shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)
-                        )
-                )
-            }
-        }
-
-        // Main Rugged Walkie-Talkie Handset Body
+        // =========================================================================
+        // 1. AUTHENTIC TOP HARDWARE: Telescopic Angled Radio Antenna + Carry Handle
+        // =========================================================================
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .shadow(
-                    elevation = 20.dp,
-                    shape = RoundedCornerShape(38.dp),
-                    ambientColor = if (isRecording) CoralSalmonDeep.copy(alpha = 0.55f) else Color(0xFF0A1D29),
-                    spotColor = if (isRecording) CoralSalmonDeep.copy(alpha = 0.55f) else Color(0xFF0A1D29)
-                )
-                .clip(RoundedCornerShape(38.dp))
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color(0xFF18364A),
-                            Color(0xFF0F2534),
-                            Color(0xFF0B1A26)
+                .height(42.dp)
+                .padding(horizontal = 24.dp)
+        ) {
+            // Angled Telescopic Retro Whip Antenna + Animated Broadcast Ripples on Left
+            Canvas(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .size(width = 110.dp, height = 42.dp)
+            ) {
+                val baseX = 24.dp.toPx()
+                val baseY = size.height
+                val tipX = 76.dp.toPx()
+                val tipY = 8.dp.toPx()
+
+                // Radio broadcast arcs radiating from the antenna tip when talking or unlocked!
+                if ((isRecording || effectiveUnlocked) && !reducedMotion) {
+                    val arcColor = if (isRecording) ClayCoral else ClayHoneyLight
+                    listOf(radioWaveRing, (radioWaveRing + 0.5f) % 1f).forEach { p ->
+                        val r = (8.dp.toPx() + p * 22.dp.toPx())
+                        drawArc(
+                            color = arcColor.copy(alpha = (1f - p) * 0.85f),
+                            startAngle = -75f,
+                            sweepAngle = 110f,
+                            useCenter = false,
+                            topLeft = Offset(tipX - r, tipY - r),
+                            size = Size(r * 2f, r * 2f),
+                            style = Stroke(width = 2.6.dp.toPx(), cap = StrokeCap.Round)
                         )
-                    )
+                    }
+                }
+
+                // Telescopic rod shadow
+                drawLine(
+                    color = ClayTealShadow.copy(alpha = 0.32f),
+                    start = Offset(baseX + 2f, baseY + 1f),
+                    end = Offset(tipX + 2f, tipY + 3f),
+                    strokeWidth = 7.dp.toPx(),
+                    cap = StrokeCap.Round
                 )
-                .border(
-                    width = 2.dp,
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.34f),
-                            StudioTeal.copy(alpha = 0.22f),
-                            Color.Black.copy(alpha = 0.45f)
-                        )
+                // Main sculpted Turquoise-Aqua telescopic rod
+                drawLine(
+                    brush = Brush.linearGradient(
+                        listOf(ClayAquaDeep, ClayAquaLight, ClayAqua),
+                        start = Offset(baseX, baseY),
+                        end = Offset(tipX, tipY)
                     ),
-                    shape = RoundedCornerShape(38.dp)
+                    start = Offset(baseX, baseY),
+                    end = Offset(tipX, tipY),
+                    strokeWidth = 6.2.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
+                // Glossy top-edge highlight on rod
+                drawLine(
+                    color = Color.White.copy(alpha = 0.65f),
+                    start = Offset(baseX, baseY - 1.5f),
+                    end = Offset(tipX - 3f, tipY - 1.5f),
+                    strokeWidth = 1.6.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
+                // Molded antenna base collar
+                drawRoundRect(
+                    color = ClayAquaDeep,
+                    topLeft = Offset(baseX - 9.dp.toPx(), baseY - 8.dp.toPx()),
+                    size = Size(18.dp.toPx(), 10.dp.toPx()),
+                    cornerRadius = CornerRadius(5.dp.toPx(), 5.dp.toPx())
+                )
+                // Glowing Coral/Honey Bead Tip
+                drawCircle(
+                    color = ClayTealShadow.copy(alpha = 0.35f),
+                    radius = 7.5.dp.toPx(),
+                    center = Offset(tipX, tipY + 2f)
+                )
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = if (isRecording) {
+                            listOf(ClayHoneyLight, ClayCoral, ClayCoralDeep)
+                        } else {
+                            listOf(ClayCoralLight, ClayCoral, ClayCoralDeep)
+                        },
+                        center = Offset(tipX - 2.dp.toPx(), tipY - 2.dp.toPx()),
+                        radius = 9.dp.toPx()
+                    ),
+                    radius = 7.5.dp.toPx(),
+                    center = Offset(tipX, tipY)
+                )
+            }
+
+            // Sculpted Portable Radio Carrying Arch Handle (centered/right like classic Braun/Smeg radio)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .width(176.dp)
+                    .height(26.dp)
+            ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val archStroke = 10.dp.toPx()
+                    val pad = archStroke / 2f + 2.dp.toPx()
+                    val path = Path().apply {
+                        moveTo(pad, size.height)
+                        lineTo(pad, 11.dp.toPx())
+                        quadraticTo(pad, 2.dp.toPx(), pad + 14.dp.toPx(), 2.dp.toPx())
+                        lineTo(size.width - pad - 14.dp.toPx(), 2.dp.toPx())
+                        quadraticTo(size.width - pad, 2.dp.toPx(), size.width - pad, 11.dp.toPx())
+                        lineTo(size.width - pad, size.height)
+                    }
+                    // Handle drop shadow
+                    drawPath(
+                        path = path,
+                        color = ClayTealShadow.copy(alpha = 0.28f),
+                        style = Stroke(width = archStroke + 2f, cap = StrokeCap.Round)
+                    )
+                    // Main Warm Honey-Gold Matte Clay Carrying Handle
+                    drawPath(
+                        path = path,
+                        brush = Brush.verticalGradient(
+                            listOf(ClayHoneyLight, ClayHoney, ClayHoneyDeep)
+                        ),
+                        style = Stroke(width = archStroke, cap = StrokeCap.Round)
+                    )
+                    // Specular clay rim along top of handle
+                    drawLine(
+                        color = Color.White.copy(alpha = 0.65f),
+                        start = Offset(pad + 14.dp.toPx(), 0.dp.toPx()),
+                        end = Offset(size.width - pad - 14.dp.toPx(), 0.dp.toPx()),
+                        strokeWidth = 2.dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                }
+            }
+        }
+
+        // =========================================================================
+        // 2. AUTHENTIC RETRO 3D MATTE CLAY RADIO CABINET CHASSIS
+        // =========================================================================
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .claymorphic(
+                    cornerRadius = 34.dp,
+                    surfaceColor = ClayPeach,
+                    elevation = 18.dp,
+                    shadowTint = ClayTealShadow,
+                    ledgeDepth = 9.dp
                 )
         ) {
-            // Left & Right Tactile Coral Rubber Bumper Grips
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .padding(vertical = 54.dp)
-                    .width(8.dp)
-                    .height(140.dp)
-                    .clip(RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp))
-                    .background(CoralSalmonDeep.copy(alpha = 0.9f))
-            )
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(vertical = 54.dp)
-                    .width(8.dp)
-                    .height(140.dp)
-                    .clip(RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp))
-                    .background(CoralSalmonDeep.copy(alpha = 0.9f))
-            )
+            // Subtle molded vintage cabinet frame trim & 4 corner clay rivets
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val inset = 9.dp.toPx()
+                drawRoundRect(
+                    color = ClayPeachDeep.copy(alpha = 0.36f),
+                    topLeft = Offset(inset, inset),
+                    size = Size(size.width - inset * 2, size.height - inset * 2 - 4.dp.toPx()),
+                    cornerRadius = CornerRadius(26.dp.toPx(), 26.dp.toPx()),
+                    style = Stroke(width = 1.6.dp.toPx())
+                )
+                // 4 charming molded brass-honey corner rivets
+                val rivetInset = 18.dp.toPx()
+                val corners = listOf(
+                    Offset(rivetInset, rivetInset),
+                    Offset(size.width - rivetInset, rivetInset),
+                    Offset(rivetInset, size.height - rivetInset - 4.dp.toPx()),
+                    Offset(size.width - rivetInset, size.height - rivetInset - 4.dp.toPx())
+                )
+                corners.forEach { c ->
+                    drawCircle(color = ClayPeachDeep.copy(alpha = 0.65f), radius = 3.2.dp.toPx(), center = c)
+                    drawCircle(color = ClayVanillaLight, radius = 1.4.dp.toPx(), center = Offset(c.x - 0.8f, c.y - 0.8f))
+                }
+            }
 
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 20.dp),
+                    .fillMaxSize()
+                    .padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Top Brand Plate + Live TX / RX LED Indicators
+                // -----------------------------------------------------------------
+                // A. UPPER HALF: VINTAGE PERFORATED SPEAKER GRILLE + NAMEPLATE
+                // -----------------------------------------------------------------
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Top LED jewels + Classic Chrome-Clay Nameplate
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            RadioJewelLed(
+                                label = "ON AIR",
+                                isLit = isRecording,
+                                litColor = ClayCoral,
+                                unlitColor = Color(0xFFD6AC92)
+                            )
+                            RadioJewelLed(
+                                label = if (effectiveUnlocked) "READY" else "LOCKED",
+                                isLit = effectiveUnlocked,
+                                litColor = EmeraldAccept,
+                                unlitColor = ClayHoney
+                            )
+                        }
+
+                        // Vintage Molded Radio Crest Plate
+                        Box(
+                            modifier = Modifier
+                                .claymorphic(
+                                    cornerRadius = 14.dp,
+                                    surfaceColor = ClayAqua,
+                                    elevation = 5.dp,
+                                    ledgeDepth = 2.5.dp
+                                )
+                                .padding(horizontal = 10.dp, vertical = 3.dp)
+                        ) {
+                            Text3D(
+                                text = "HOLY MOLY • FM",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = 0.8.sp,
+                                    fontSize = 10.5.sp
+                                ),
+                                depthDp = 1.dp
+                            )
+                        }
+                    }
+
+                    // Authentic Perforated Dot-Matrix Vintage Speaker Chamber!
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                            .pastelRecessedWell(
+                                cornerRadius = 20.dp,
+                                surfaceColor = Color(0xFF1A4E52),
+                                shadowTint = ClayDeepTealInk
+                            )
+                            .border(2.dp, ClayVanillaLight.copy(alpha = 0.82f), RoundedCornerShape(20.dp))
+                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                    ) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val cols = 19
+                            val rows = 4
+                            val dx = size.width / cols
+                            val dy = size.height / rows
+                            val dotR = 2.6.dp.toPx()
+
+                            for (r in 0 until rows) {
+                                for (c in 0 until cols) {
+                                    // Taper corners like a real retro oval/capsule speaker grille
+                                    if ((r == 0 || r == rows - 1) && (c == 0 || c == cols - 1)) continue
+                                    val cx = c * dx + dx / 2f
+                                    val cy = r * dy + dy / 2f
+
+                                    // When broadcasting, warm acoustic energy pulses behind the speaker holes!
+                                    val waveEnergy = if (isRecording) {
+                                        ((sin(wavePhase + c * 0.55f) + 1f) * 0.5f)
+                                    } else 0f
+
+                                    val holeColor = if (isRecording && waveEnergy > 0.45f) {
+                                        ClayHoneyLight.copy(alpha = 0.55f + waveEnergy * 0.45f)
+                                    } else {
+                                        Color(0xFF0C2C2F)
+                                    }
+
+                                    // Sunlit bottom-right bevel of each speaker perforation
+                                    drawCircle(
+                                        color = ClayAquaLight.copy(alpha = 0.25f),
+                                        radius = dotR,
+                                        center = Offset(cx + 0.8f, cy + 1f)
+                                    )
+                                    drawCircle(
+                                        color = holeColor,
+                                        radius = dotR,
+                                        center = Offset(cx, cy)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // -----------------------------------------------------------------
+                    // B. ILLUMINATED ANALOG RADIO GLASS TUNING DIAL + LIVE NEEDLE!
+                    // -----------------------------------------------------------------
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(62.dp)
+                            .claymorphic(
+                                cornerRadius = 20.dp,
+                                surfaceColor = ClayVanillaLight,
+                                elevation = 8.dp,
+                                shadowTint = ClayTealShadow,
+                                ledgeDepth = 4.dp
+                            )
+                            .border(2.2.dp, ClayAqua, RoundedCornerShape(20.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // Top row inside glass dial: Live MHz Frequency + Preset Status
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    ClayTextOnLight(
+                                        text = if (effectiveUnlocked) "${activePreset.first} FM" else "%.1f FM".format(liveMhz),
+                                        style = MaterialTheme.typography.labelLarge.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 13.sp
+                                        ),
+                                        textColor = if (isRecording) ClayCoralDeep else ClayDeepTealInk,
+                                        depthDp = 0.8.dp
+                                    )
+                                    ClayTextOnLight(
+                                        text = "•",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        textColor = ClayMutedInk,
+                                        depthDp = 0.dp
+                                    )
+                                    ClayTextOnLight(
+                                        text = when {
+                                            isRecording -> "ON AIR %02d:%02d".format(elapsedSec / 60, elapsedSec % 60)
+                                            justSentBurst -> "SENT TO FAMILY!"
+                                            effectiveUnlocked -> activePreset.second
+                                            else -> "SPIN DIAL TO TUNE"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 11.sp
+                                        ),
+                                        textColor = when {
+                                            isRecording -> ClayCoralDeep
+                                            effectiveUnlocked -> ClaySageDeep
+                                            else -> ClayHoneyDeep
+                                        },
+                                        depthDp = 0.6.dp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                ClayTextOnLight(
+                                    text = if (isOnline) selfMember.title.uppercase() else "OFFLINE",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 10.sp
+                                    ),
+                                    textColor = ClayAquaDeep,
+                                    depthDp = 0.5.dp
+                                )
+                            }
+
+                            // Authentic Vintage Analog Scale Ticks + Glowing Family Sweet-Spot + Gliding Coral Needle!
+                            Canvas(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(26.dp)
+                            ) {
+                                val trackY = size.height * 0.62f
+                                val padX = 6.dp.toPx()
+                                val usableW = (size.width - padX * 2).coerceAtLeast(1f)
+
+                                // Warm amber glass track line
+                                drawLine(
+                                    color = ClayPeachDeep.copy(alpha = 0.5f),
+                                    start = Offset(padX, trackY),
+                                    end = Offset(size.width - padX, trackY),
+                                    strokeWidth = 2.dp.toPx(),
+                                    cap = StrokeCap.Round
+                                )
+
+                                // Glowing Sweet-Spot Target Zone on the FM scale
+                                val targetX = padX + activePreset.third * usableW
+                                drawRoundRect(
+                                    color = if (effectiveUnlocked) ClaySage.copy(alpha = 0.35f) else ClayHoney.copy(alpha = 0.32f),
+                                    topLeft = Offset(targetX - 16.dp.toPx(), 2.dp.toPx()),
+                                    size = Size(32.dp.toPx(), size.height - 4.dp.toPx()),
+                                    cornerRadius = CornerRadius(8.dp.toPx(), 8.dp.toPx())
+                                )
+
+                                // Precision vintage radio frequency ticks (major & minor)
+                                val ticks = 28
+                                for (i in 0..ticks) {
+                                    val tx = padX + (i / ticks.toFloat()) * usableW
+                                    val isMajor = i % 4 == 0
+                                    val tickTop = if (isMajor) 3.dp.toPx() else 9.dp.toPx()
+                                    val tickBottom = trackY
+                                    drawLine(
+                                        color = if (isMajor) ClayDeepTealInk.copy(alpha = 0.72f) else ClayMutedInk.copy(alpha = 0.45f),
+                                        start = Offset(tx, tickTop),
+                                        end = Offset(tx, tickBottom),
+                                        strokeWidth = if (isMajor) 2.dp.toPx() else 1.2.dp.toPx(),
+                                        cap = StrokeCap.Round
+                                    )
+                                }
+
+                                // Live VU pulse bars right along the bottom when broadcasting
+                                if (isRecording) {
+                                    for (i in 0..16) {
+                                        val bx = padX + (i / 16f) * usableW
+                                        val amp = (sin(wavePhase + i * 0.8f) + 1f) * 0.5f
+                                        drawCircle(
+                                            color = ClayCoral.copy(alpha = 0.35f + amp * 0.65f),
+                                            radius = (1.6f + amp * 2.2f).dp.toPx(),
+                                            center = Offset(bx, size.height - 3.dp.toPx())
+                                        )
+                                    }
+                                }
+
+                                // Gliding Watermelon-Coral Analog Tuning Needle!
+                                val needleX = padX + animatedNeedlePos * usableW
+                                // Needle shadow
+                                drawLine(
+                                    color = ClayTealShadow.copy(alpha = 0.3f),
+                                    start = Offset(needleX + 1.5f, 1.dp.toPx()),
+                                    end = Offset(needleX + 1.5f, size.height - 1.dp.toPx()),
+                                    strokeWidth = 3.5.dp.toPx(),
+                                    cap = StrokeCap.Round
+                                )
+                                // Crisp Coral Needle
+                                drawLine(
+                                    color = ClayCoral,
+                                    start = Offset(needleX, 1.dp.toPx()),
+                                    end = Offset(needleX, size.height - 1.dp.toPx()),
+                                    strokeWidth = 3.2.dp.toPx(),
+                                    cap = StrokeCap.Round
+                                )
+                                // Needle top ruby cap
+                                drawCircle(
+                                    color = ClayCoralDeep,
+                                    radius = 4.dp.toPx(),
+                                    center = Offset(needleX, 4.dp.toPx())
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // -----------------------------------------------------------------
+                // C. HERO INTERACTIVE CENTERPIECE:
+                //    VINTAGE LANDLINE ROTARY DIAL PUZZLE + 3D POP-UP PTT PLUNGER!
+                // -----------------------------------------------------------------
+                Box(
+                    modifier = Modifier.size(234.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Broadcast Expanding Energy Rings when Talking
+                    if (isRecording && !reducedMotion) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val maxR = size.minDimension / 2f
+                            listOf(radioWaveRing, (radioWaveRing + 0.5f) % 1f).forEach { p ->
+                                drawCircle(
+                                    color = ClayHoney.copy(alpha = (1f - p) * 0.72f),
+                                    radius = maxR * (0.64f + p * 0.36f),
+                                    style = Stroke(width = 4.dp.toPx())
+                                )
+                            }
+                        }
+                    }
+
+                    // Recessed Vintage Rotary Dial Well + Outer Progress Ring
+                    Box(
+                        modifier = Modifier
+                            .size(226.dp)
+                            .pastelRecessedWell(
+                                cornerRadius = 113.dp,
+                                surfaceColor = Color(0xFFEFC1A2),
+                                shadowTint = ClayTealShadow
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Outer Spin-Progress Halo Arc
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val strokeW = 5.dp.toPx()
+                            val inset = 6.dp.toPx()
+                            val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
+                            if (effectiveUnlocked) {
+                                drawArc(
+                                    color = ClaySage.copy(alpha = 0.85f),
+                                    startAngle = 0f,
+                                    sweepAngle = 360f,
+                                    useCenter = false,
+                                    topLeft = Offset(inset, inset),
+                                    size = arcSize,
+                                    style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                                )
+                            } else if (spinFraction > 0.01f) {
+                                drawArc(
+                                    color = ClayHoney,
+                                    startAngle = -140f,
+                                    sweepAngle = spinFraction * 260f,
+                                    useCenter = false,
+                                    topLeft = Offset(inset, inset),
+                                    size = arcSize,
+                                    style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                                )
+                            }
+                        }
+
+                        // ROTATING 3D LANDLINE FINGER WHEEL (Drag Clockwise OR Tap Golden Hole!)
+                        // Pointer tracking lives on the NON-ROTATING outer Box so drag angles stay rock-solid 1:1!
+                        var lastTouchAngle by remember { mutableFloatStateOf(0f) }
+                        var lastClickBucket by remember { mutableIntStateOf(0) }
+
+                        Box(
+                            modifier = Modifier
+                                .size(214.dp)
+                                .pointerInput(effectiveUnlocked, isSpinningAuto) {
+                                    if (effectiveUnlocked || isSpinningAuto) return@pointerInput
+                                    detectTapGestures(
+                                        onTap = {
+                                            // Kid-friendly 1-tap spin assist for 6-year-olds!
+                                            triggerGuidedRotarySpin()
+                                        }
+                                    )
+                                }
+                                .pointerInput(effectiveUnlocked, isSpinningAuto) {
+                                    if (effectiveUnlocked || isSpinningAuto) return@pointerInput
+                                    detectDragGestures(
+                                        onDragStart = { offset ->
+                                            val cx = size.width / 2f
+                                            val cy = size.height / 2f
+                                            lastTouchAngle = (atan2(offset.y - cy, offset.x - cx) * 180f / PI.toFloat())
+                                            lastClickBucket = floor(rotaryAngle.value / 24f).toInt()
+                                        },
+                                        onDrag = { change, _ ->
+                                            change.consume()
+                                            val cx = size.width / 2f
+                                            val cy = size.height / 2f
+                                            val curAngle = (atan2(change.position.y - cy, change.position.x - cx) * 180f / PI.toFloat())
+                                            var delta = curAngle - lastTouchAngle
+                                            while (delta > 180f) delta -= 360f
+                                            while (delta < -180f) delta += 360f
+                                            lastTouchAngle = curAngle
+
+                                            val next = (rotaryAngle.value + delta).coerceIn(0f, 140f)
+                                            scope.launch { rotaryAngle.snapTo(next) }
+
+                                            val bucket = floor(next / 24f).toInt()
+                                            if (bucket != lastClickBucket) {
+                                                lastClickBucket = bucket
+                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            }
+                                        },
+                                        onDragEnd = {
+                                            scope.launch {
+                                                val reached = rotaryAngle.value >= 72f
+                                                if (reached) {
+                                                    isDialUnlocked = true
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                }
+                                                // Authentic spring-loaded landline rotary dial recoil!
+                                                rotaryAngle.animateTo(
+                                                    targetValue = 0f,
+                                                    animationSpec = spring(
+                                                        dampingRatio = 0.56f,
+                                                        stiffness = 135f
+                                                    )
+                                                )
+                                            }
+                                        },
+                                        onDragCancel = {
+                                            scope.launch {
+                                                rotaryAngle.animateTo(
+                                                    targetValue = 0f,
+                                                    animationSpec = spring(dampingRatio = 0.6f, stiffness = 160f)
+                                                )
+                                            }
+                                        }
+                                    )
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        rotationZ = rotaryAngle.value
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                            // Sculpted 3D Matte Clay Rotary Finger Wheel Canvas
+                            val holeLabels = listOf("★", "2", "3", "4", "5", "6")
+                            val holeColors = listOf(ClayHoney, ClayAqua, ClayCoral, ClaySage, ClayAqua, ClayCoral)
+
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                val r = size.minDimension / 2f
+                                val center = Offset(size.width / 2f, size.height / 2f)
+
+                                // 3D bottom extruded clay lip of the rotary wheel
+                                drawCircle(
+                                    color = ClayVanillaDeep,
+                                    radius = r - 1.dp.toPx(),
+                                    center = Offset(center.x, center.y + 4.dp.toPx())
+                                )
+                                // Main Vanilla-Cream sculpted clay rotary disc
+                                drawCircle(
+                                    brush = Brush.radialGradient(
+                                        colors = listOf(ClayVanillaLight, ClayVanilla, Color(0xFFF3DEC0)),
+                                        center = Offset(center.x - r * 0.25f, center.y - r * 0.25f),
+                                        radius = r * 1.45f
+                                    ),
+                                    radius = r - 2.dp.toPx(),
+                                    center = center
+                                )
+                                // Crisp sunlit upper-left bevel ring
+                                drawCircle(
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    radius = r - 3.dp.toPx(),
+                                    center = center,
+                                    style = Stroke(width = 2.dp.toPx())
+                                )
+
+                                // 6 Authentic Recessed Landline Finger Holes arranged around the wheel!
+                                // Angles from -130° clockwise to +10° (leaving room on right for the Finger Stop)
+                                val startDeg = -135f
+                                val stepDeg = 38f
+                                val ringRadius = r * 0.74f
+                                val holeRadius = 17.5.dp.toPx()
+
+                                for (i in 0 until 6) {
+                                    val deg = startDeg + i * stepDeg
+                                    val rad = deg * (PI / 180.0)
+                                    val hx = center.x + (cos(rad) * ringRadius).toFloat()
+                                    val hy = center.y + (sin(rad) * ringRadius).toFloat()
+                                    val isTargetStar = i == 0 && !effectiveUnlocked
+
+                                    // Pulsing Honey-Gold target halo on hole #1 so a 6-year-old spots it instantly!
+                                    if (isTargetStar) {
+                                        drawCircle(
+                                            color = ClayHoney.copy(alpha = 0.35f + hintPulse * 0.5f),
+                                            radius = holeRadius + (3.dp.toPx() + hintPulse * 3.dp.toPx()),
+                                            center = Offset(hx, hy)
+                                        )
+                                    }
+
+                                    // Deep recessed inner finger-hole shadow
+                                    drawCircle(
+                                        color = ClayDeepTealInk.copy(alpha = 0.28f),
+                                        radius = holeRadius,
+                                        center = Offset(hx, hy)
+                                    )
+                                    // Colored glazed ceramic-clay bottom inside each finger hole
+                                    drawCircle(
+                                        brush = Brush.radialGradient(
+                                            colors = if (isTargetStar) {
+                                                listOf(ClayHoneyLight, ClayHoney)
+                                            } else {
+                                                listOf(holeColors[i].copy(alpha = 0.85f), holeColors[i])
+                                            },
+                                            center = Offset(hx + 2.dp.toPx(), hy + 3.dp.toPx()),
+                                            radius = holeRadius * 1.1f
+                                        ),
+                                        radius = holeRadius - 2.2.dp.toPx(),
+                                        center = Offset(hx, hy + 1.dp.toPx())
+                                    )
+                                    // Recessed rim lip highlight
+                                    drawCircle(
+                                        color = Color.White.copy(alpha = if (isTargetStar) 0.95f else 0.72f),
+                                        radius = holeRadius,
+                                        center = Offset(hx, hy),
+                                        style = Stroke(width = if (isTargetStar) 2.2.dp.toPx() else 1.4.dp.toPx())
+                                    )
+                                }
+
+                                // Curved clockwise hint arrow on the wheel when locked
+                                if (!effectiveUnlocked && spinFraction < 0.1f) {
+                                    drawArc(
+                                        color = ClayHoneyDeep.copy(alpha = 0.45f + hintPulse * 0.4f),
+                                        startAngle = -105f,
+                                        sweepAngle = 54f,
+                                        useCenter = false,
+                                        topLeft = Offset(center.x - r * 0.92f, center.y - r * 0.92f),
+                                        size = Size(r * 1.84f, r * 1.84f),
+                                        style = Stroke(width = 2.8.dp.toPx(), cap = StrokeCap.Round)
+                                    )
+                                }
+                            }
+
+                            // Crisp 3D Number/Star labels inside the 6 finger holes
+                            val startDeg = -135.0
+                            val stepDeg = 38.0
+                            val ringOffsetDp = 79.dp
+                            holeLabels.forEachIndexed { idx, lbl ->
+                                val rad = (startDeg + idx * stepDeg) * (PI / 180.0)
+                                val ox = (cos(rad) * ringOffsetDp.value).dp
+                                val oy = (sin(rad) * ringOffsetDp.value).dp
+                                Text3D(
+                                    text = lbl,
+                                    style = MaterialTheme.typography.labelLarge.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = if (idx == 0) 16.sp else 13.5.sp
+                                    ),
+                                    depthDp = 1.dp,
+                                    modifier = Modifier.offset(x = ox, y = oy)
+                                )
+                            }
+                            }
+                        }
+
+                        // FIXED 3D HONEY-GOLD FINGER-STOP BRACKET (Authentic vintage landline stop at 4 o'clock!)
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .offset(x = (-2).dp, y = 46.dp)
+                                .graphicsLayer { rotationZ = 24f }
+                                .width(34.dp)
+                                .height(15.dp)
+                                .shadow(6.dp, RoundedCornerShape(8.dp), ambientColor = ClayTealShadow, spotColor = ClayTealShadow)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Brush.verticalGradient(listOf(ClayHoneyLight, ClayHoney, ClayHoneyDeep)))
+                                .border(1.4.dp, Color.White.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
+                        )
+
+                        // =========================================================================
+                        // REAL 3D PHYSICAL POP-UP / PUSH-DOWN HOLD-TO-TALK PLUNGER BUTTON!
+                        // =========================================================================
+                        Box(
+                            modifier = Modifier
+                                .size(116.dp)
+                                .graphicsLayer {
+                                    rotationZ = lockedShake.value
+                                    scaleX = plungerScale
+                                    scaleY = plungerScale
+                                }
+                                .testTag("walkie_talkie_hold_button")
+                                .pointerInput(effectiveUnlocked) {
+                                    detectTapGestures(
+                                        onPress = {
+                                            if (!effectiveUnlocked) {
+                                                // Playful 3D wiggle + gently invite child to spin the golden hole!
+                                                triggerLockedWiggle()
+                                                return@detectTapGestures
+                                            }
+                                            val started = onPressStart()
+                                            if (!started) return@detectTapGestures
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            try {
+                                                tryAwaitRelease()
+                                            } finally {
+                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                onPressRelease()
+                                                if (puzzleModeEnabled) {
+                                                    justSentBurst = true
+                                                }
+                                            }
+                                        }
+                                    )
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            // Deep recessed center plunger socket
+                            Box(
+                                modifier = Modifier
+                                    .size(114.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (effectiveUnlocked) ClaySageDeep.copy(alpha = 0.25f)
+                                        else ClayDeepTealInk.copy(alpha = 0.2f)
+                                    )
+                                    .border(
+                                        width = if (effectiveUnlocked) 3.dp else 2.dp,
+                                        color = if (isRecording) ClayHoney else if (effectiveUnlocked) ClaySage else ClayPeachDeep,
+                                        shape = CircleShape
+                                    )
+                            )
+
+                            // REAL 3D EXTRUDED CYLINDER BARREL + MOVING DOME CAP!
+                            // As plungerLiftDp changes (3dp locked -> 13dp popped UP -> 2dp pressed DOWN),
+                            // the cylinder side wall visibly extends and collapses in real 3D!
+                            val capTopColor = when {
+                                isRecording -> ClayHoneyLight
+                                effectiveUnlocked -> ClayCoralLight
+                                else -> ClayAquaLight
+                            }
+                            val capMidColor = when {
+                                isRecording -> ClayHoney
+                                effectiveUnlocked -> ClayCoral
+                                else -> ClayAqua
+                            }
+                            val barrelDeepColor = when {
+                                isRecording -> ClayHoneyDeep
+                                effectiveUnlocked -> ClayCoralDeep
+                                else -> ClayAquaDeep
+                            }
+
+                            // 3D Cylindrical Side Wall + Dynamic Cast Shadow
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                val capR = 48.dp.toPx()
+                                val liftPx = plungerLiftDp.toPx()
+                                val baseCenter = Offset(size.width / 2f, size.height / 2f + 4.dp.toPx())
+                                val capCenter = Offset(size.width / 2f, baseCenter.y - liftPx)
+
+                                // Soft cast shadow projected onto the radio socket beneath the popped-up plunger
+                                drawCircle(
+                                    color = ClayTealShadow.copy(alpha = 0.34f),
+                                    radius = capR + 2.dp.toPx(),
+                                    center = Offset(baseCenter.x, baseCenter.y + 3.dp.toPx())
+                                )
+
+                                // Sculpted 3D Vertical Cylinder Barrel (stacking discs from base up to cap!)
+                                val steps = 10
+                                for (s in 0..steps) {
+                                    val t = s / steps.toFloat()
+                                    val y = baseCenter.y - t * liftPx
+                                    drawCircle(
+                                        brush = Brush.horizontalGradient(
+                                            colors = listOf(
+                                                barrelDeepColor,
+                                                capMidColor,
+                                                barrelDeepColor
+                                            ),
+                                            startX = baseCenter.x - capR,
+                                            endX = baseCenter.x + capR
+                                        ),
+                                        radius = capR,
+                                        center = Offset(baseCenter.x, y)
+                                    )
+                                }
+
+                                // Top Sculpted Matte Clay Dome Cap
+                                drawCircle(
+                                    brush = Brush.radialGradient(
+                                        colors = listOf(capTopColor, capMidColor, barrelDeepColor.copy(alpha = 0.92f)),
+                                        center = Offset(capCenter.x - capR * 0.32f, capCenter.y - capR * 0.34f),
+                                        radius = capR * 1.55f
+                                    ),
+                                    radius = capR,
+                                    center = capCenter
+                                )
+                                // Crisp sunlit upper clay rim on the button cap
+                                drawCircle(
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(
+                                            Color.White.copy(alpha = 0.88f),
+                                            Color.Transparent,
+                                            barrelDeepColor.copy(alpha = 0.55f)
+                                        ),
+                                        start = Offset(capCenter.x - capR, capCenter.y - capR),
+                                        end = Offset(capCenter.x + capR, capCenter.y + capR)
+                                    ),
+                                    radius = capR - 1.5.dp.toPx(),
+                                    center = capCenter,
+                                    style = Stroke(width = 2.4.dp.toPx())
+                                )
+                            }
+
+                            // Center Plunger Icon + 3D Text (rides up & down WITH the physical 3D plunger cap!)
+                            Column(
+                                modifier = Modifier.offset(y = 4.dp - plungerLiftDp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(1.dp)
+                            ) {
+                                Icon(
+                                    imageVector = when {
+                                        isRecording -> Icons.Rounded.GraphicEq
+                                        effectiveUnlocked -> Icons.Rounded.Mic
+                                        else -> Icons.Rounded.Lock
+                                    },
+                                    contentDescription = if (effectiveUnlocked) "Hold to talk" else "Spin rotary dial to unlock",
+                                    tint = ClayTextCream,
+                                    modifier = Modifier.size(if (effectiveUnlocked) 30.dp else 26.dp)
+                                )
+                                Text3D(
+                                    text = when {
+                                        isRecording -> "TALKING!"
+                                        effectiveUnlocked -> "HOLD"
+                                        else -> "SPIN"
+                                    },
+                                    style = MaterialTheme.typography.labelLarge.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 14.sp
+                                    ),
+                                    extrudeColor = Color(0x664A1D18),
+                                    depthDp = 1.6.dp
+                                )
+                                Text3D(
+                                    text = when {
+                                        isRecording -> "Release"
+                                        effectiveUnlocked -> "TO TALK"
+                                        else -> "DIAL ★"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 9.5.sp
+                                    ),
+                                    extrudeColor = Color(0x554A1D18),
+                                    depthDp = 1.dp
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // -----------------------------------------------------------------
+                // D. LOWER AUTHENTIC 3D RADIO HARDWARE DECK:
+                //    Left 3D Push-Switch (PUZZLE / FREE) + Guide + Right 3D Rotary Knob (CH)
+                // -----------------------------------------------------------------
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(if (isRecording) Color(0xFFFF4D4D) else Color(0xFF334E5E))
-                                .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape)
-                        )
-                        Text(
-                            text = "TX",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = if (isRecording) Color(0xFFFF8080) else Color(0xFF7D9CAE)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(if (isOnline) EmeraldAccept else Color(0xFF475569))
-                                .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape)
-                        )
-                        Text(
-                            text = "LINK",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = if (isOnline) EmeraldAccept else Color(0xFF7D9CAE)
-                        )
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color.White.copy(alpha = 0.08f)
-                    ) {
-                        Text(
-                            text = "A12-E • CH 03",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontFamily = FontFamily.Monospace,
-                                letterSpacing = 1.2.sp,
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = Color(0xFFD6E6EE),
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-
-                // Perforated Acoustic Speaker Grille
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                ) {
-                    val rows = 4
-                    val rowGap = size.height / (rows + 1)
-                    val slotHeight = 4.5.dp.toPx()
-                    for (r in 1..rows) {
-                        val y = r * rowGap
-                        val inset = if (r == 1 || r == rows) 18.dp.toPx() else 4.dp.toPx()
-                        val slotWidth = size.width - inset * 2
-                        // Dark acoustic slit
-                        drawRoundRect(
-                            color = Color(0xFF061017),
-                            topLeft = Offset(inset, y - slotHeight / 2f),
-                            size = Size(slotWidth, slotHeight),
-                            cornerRadius = CornerRadius(slotHeight / 2f, slotHeight / 2f)
-                        )
-                        // Subtle bottom bevel reflection
-                        drawRoundRect(
-                            color = Color.White.copy(alpha = 0.12f),
-                            topLeft = Offset(inset + 2f, y + slotHeight / 2f),
-                            size = Size((slotWidth - 4f).coerceAtLeast(0f), 1.dp.toPx()),
-                            cornerRadius = CornerRadius(1f, 1f)
-                        )
-                    }
-                }
-
-                // Backlit Retro LCD Display Screen
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(
-                            if (isRecording) Color(0xFF2B130B) else Color(0xFF0A2429)
-                        )
-                        .border(
-                            width = 2.dp,
-                            color = if (isRecording) CoralSalmonDeep.copy(alpha = 0.8f) else StudioTeal.copy(alpha = 0.48f),
-                            shape = RoundedCornerShape(18.dp)
-                        )
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = if (isRecording) "● ON AIR • BROADCASTING" else "FAMILY RADIO • READY",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.sp
-                                ),
-                                color = if (isRecording) OchreGoldBright else Color(0xFF5EEAD4)
-                            )
-                            Text(
-                                text = if (isRecording) {
-                                    "%02d:%02d".format(elapsedSec / 60, elapsedSec % 60)
-                                } else {
-                                    selfMember.title.uppercase()
-                                },
-                                style = MaterialTheme.typography.labelMedium.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.ExtraBold
-                                ),
-                                color = if (isRecording) Color.White else Color(0xFF99F6E4)
-                            )
-                        }
-
-                        // Live Radio Frequency Waveform Visualizer inside LCD
-                        Canvas(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(26.dp)
-                        ) {
-                            val barCount = 24
-                            val spacing = size.width / barCount
-                            val barWidth = (spacing * 0.56f).coerceAtLeast(3f)
-                            val activeColor = if (isRecording) Color(0xFFFF9F43) else Color(0xFF2DD4BF).copy(alpha = 0.45f)
-                            for (i in 0 until barCount) {
-                                val amp = if (isRecording) {
-                                    val wave = (sin(wavePhase + i * 0.65f) + 1f) * 0.5f
-                                    0.22f + wave * 0.78f
-                                } else {
-                                    0.18f
-                                }
-                                val barH = size.height * amp
-                                val x = i * spacing + (spacing - barWidth) / 2f
-                                drawRoundRect(
-                                    color = activeColor,
-                                    topLeft = Offset(x, (size.height - barH) / 2f),
-                                    size = Size(barWidth, barH),
-                                    cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)
-                                )
+                    // Left 3D Mechanical Square Radio Switch: Toggle Rotary Puzzle / Free Talk
+                    Radio3DMechanicalSwitch(
+                        label = if (puzzleModeEnabled) "PUZZLE" else "FREE",
+                        isPressedIn = !puzzleModeEnabled,
+                        activeColor = if (puzzleModeEnabled) ClayHoney else ClaySage,
+                        testTag = "radio_puzzle_mode_switch",
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            puzzleModeEnabled = !puzzleModeEnabled
+                            if (!puzzleModeEnabled) {
+                                isDialUnlocked = true
+                            } else {
+                                isDialUnlocked = false
                             }
                         }
-                    }
-                }
+                    )
 
-                // Giant Tactile Push-To-Talk (PTT) Circular Radio Button
-                Box(
-                    modifier = Modifier
-                        .size(188.dp)
-                        .testTag("walkie_talkie_hold_button")
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onPress = {
-                                    val started = onPressStart()
-                                    if (!started) return@detectTapGestures
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    try {
-                                        tryAwaitRelease()
-                                    } finally {
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onPressRelease()
-                                    }
-                                }
-                            )
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    // Pulsing Radio Transmission Waves while holding PTT
-                    if (isRecording && !reducedMotion) {
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            val maxRadius = size.minDimension / 2f
-                            listOf(pulseRing, (pulseRing + 0.5f) % 1f).forEach { p ->
-                                val r = maxRadius * (0.68f + p * 0.32f)
-                                drawCircle(
-                                    color = CoralSalmonDeep.copy(alpha = (1f - p) * 0.55f),
-                                    radius = r,
-                                    style = Stroke(width = 3.dp.toPx())
-                                )
-                            }
-                        }
-                    }
-
-                    // Recessed Metallic Bezel Ring
+                    // Center Kid-Friendly Prompt Pill
                     Box(
                         modifier = Modifier
-                            .size(156.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF07131C))
-                            .border(
-                                width = 2.5.dp,
-                                color = if (isRecording) OchreGoldBright.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.16f),
-                                shape = CircleShape
+                            .weight(1f)
+                            .padding(horizontal = 8.dp)
+                            .claymorphic(
+                                cornerRadius = 16.dp,
+                                surfaceColor = ClayVanilla,
+                                elevation = 5.dp,
+                                ledgeDepth = 3.dp
                             )
-                            .padding(10.dp),
+                            .clickable(enabled = !effectiveUnlocked) {
+                                triggerGuidedRotarySpin()
+                            }
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        // Tactile Push-To-Talk Dome Button
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    scaleX = pttScale
-                                    scaleY = pttScale
-                                }
-                                .shadow(
-                                    elevation = if (isRecording) 4.dp else 14.dp,
-                                    shape = CircleShape,
-                                    ambientColor = CoralSalmonDeep,
-                                    spotColor = CoralSalmonDeep
-                                )
-                                .clip(CircleShape)
-                                .background(
-                                    Brush.radialGradient(
-                                        colors = if (isRecording) {
-                                            listOf(Color(0xFFFF6B35), Color(0xFFD9381E), Color(0xFF8C1D0E))
-                                        } else {
-                                            listOf(Color(0xFFFF834F), CoralSalmonDeep, WalkieAmberDeep)
-                                        }
-                                    )
-                                )
-                                .border(
-                                    width = 2.dp,
-                                    brush = Brush.verticalGradient(
-                                        colors = listOf(
-                                            Color.White.copy(alpha = 0.65f),
-                                            Color.Transparent,
-                                            Color.Black.copy(alpha = 0.28f)
-                                        )
-                                    ),
-                                    shape = CircleShape
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    imageVector = if (isRecording) Icons.Rounded.GraphicEq else Icons.Rounded.Mic,
-                                    contentDescription = "Hold to talk walkie talkie",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(44.dp)
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = if (isRecording) "TALKING…" else "HOLD TO",
-                                    style = MaterialTheme.typography.labelLarge.copy(
-                                        fontWeight = FontWeight.ExtraBold,
-                                        letterSpacing = 1.sp
-                                    ),
-                                    color = Color.White
-                                )
-                                Text(
-                                    text = if (isRecording) "RELEASE" else "TALK",
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.Black,
-                                        letterSpacing = 1.4.sp
-                                    ),
-                                    color = Color.White.copy(alpha = 0.96f)
-                                )
-                            }
-                        }
+                        ClayTextOnLight(
+                            text = when {
+                                isRecording -> "Keep holding to talk!"
+                                justSentBurst -> "Voice sent! ✨"
+                                effectiveUnlocked -> "Hold red button & speak!"
+                                else -> "Spin ★ around to unlock!"
+                            },
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 11.5.sp
+                            ),
+                            textColor = if (effectiveUnlocked) ClayDeepTealInk else ClayCoralDeep,
+                            textAlign = TextAlign.Center,
+                            depthDp = 0.7.dp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
-                }
 
-                // Bottom Walkie-Talkie Instruction Caption
-                Text(
-                    text = if (isRecording) {
-                        "Let go to send your voice message to the family"
-                    } else {
-                        "Press & hold the button like a walkie-talkie to send a voice clip"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF9EBAC9)
+                    // Right 3D Knurled Radio Channel Tuner Knob (Tap to Twist & Click!)
+                    Radio3DKnurledKnob(
+                        label = "CH 0${channelIndex + 1}",
+                        rotationDeg = knobAngle,
+                        testTag = "radio_channel_knob",
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            knobAngleTarget += 45f
+                            channelIndex = (channelIndex + 1) % channelPresets.size
+                        }
+                    )
+                }
+            }
+        }
+
+        // =========================================================================
+        // 3. CUTE MOLDED CLAY RADIO FEET (anchors the retro radio silhouette!)
+        // =========================================================================
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 42.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            repeat(2) {
+                Box(
+                    modifier = Modifier
+                        .width(34.dp)
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp))
+                        .background(Brush.verticalGradient(listOf(ClayAqua, ClayAquaDeep)))
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun RadioJewelLed(
+    label: String,
+    isLit: Boolean,
+    litColor: Color,
+    unlitColor: Color
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(11.dp)
+                .shadow(if (isLit) 6.dp else 1.dp, CircleShape, ambientColor = litColor, spotColor = litColor)
+                .clip(CircleShape)
+                .background(if (isLit) litColor else unlitColor)
+                .border(1.4.dp, Color.White.copy(alpha = 0.85f), CircleShape)
+        )
+        ClayTextOnLight(
+            text = label,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 10.sp
+            ),
+            textColor = if (isLit) ClayDeepTealInk else ClayMutedInk,
+            depthDp = 0.6.dp
+        )
+    }
+}
+
+/**
+ * Authentic 3D Mechanical Square Radio Push-Key with real physical Z-depression!
+ */
+@Composable
+private fun Radio3DMechanicalSwitch(
+    label: String,
+    isPressedIn: Boolean,
+    activeColor: Color,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    val liftDp by animateDpAsState(
+        targetValue = if (isPressedIn) 1.5.dp else 6.dp,
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = 460f),
+        label = "switch_lift"
+    )
+    Box(
+        modifier = Modifier
+            .width(68.dp)
+            .height(44.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(ClayPeachDeep.copy(alpha = 0.55f))
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+            .padding(3.dp),
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .offset(y = -liftDp + 3.dp)
+                .claymorphic(
+                    cornerRadius = 11.dp,
+                    surfaceColor = activeColor,
+                    elevation = if (isPressedIn) 2.dp else 8.dp,
+                    shadowTint = ClayTealShadow,
+                    ledgeDepth = liftDp
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                modifier = Modifier.padding(bottom = 2.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Refresh,
+                    contentDescription = null,
+                    tint = ClayTextCream,
+                    modifier = Modifier.size(12.dp)
+                )
+                Text3D(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Black,
+                        fontSize = 10.sp
+                    ),
+                    depthDp = 0.9.dp
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Authentic 3D Knurled Matte Clay Radio Tuning Knob that physically twists on tap!
+ */
+@Composable
+private fun Radio3DKnurledKnob(
+    label: String,
+    rotationDeg: Float,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .graphicsLayer { rotationZ = rotationDeg },
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val r = size.minDimension / 2f
+                val c = Offset(size.width / 2f, size.height / 2f)
+                // 3D base rim
+                drawCircle(color = ClayAquaDeep, radius = r, center = Offset(c.x, c.y + 3.dp.toPx()))
+                // Knurled notches around perimeter
+                for (i in 0 until 12) {
+                    val a = i * 30.0 * (PI / 180.0)
+                    val nx = c.x + (cos(a) * (r - 2.dp.toPx())).toFloat()
+                    val ny = c.y + (sin(a) * (r - 2.dp.toPx())).toFloat()
+                    drawCircle(color = ClayAquaLight, radius = 2.2.dp.toPx(), center = Offset(nx, ny))
+                }
+                // Knob top face
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        listOf(ClayAquaLight, ClayAqua, ClayAquaDeep),
+                        center = Offset(c.x - 4.dp.toPx(), c.y - 4.dp.toPx()),
+                        radius = r * 1.4f
+                    ),
+                    radius = r - 3.dp.toPx(),
+                    center = c
+                )
+                // Crisp Cream-White pointer notch (visibly rotates when tapped!)
+                drawLine(
+                    color = ClayTextCream,
+                    start = Offset(c.x, c.y - 4.dp.toPx()),
+                    end = Offset(c.x, c.y - r + 5.dp.toPx()),
+                    strokeWidth = 3.2.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
+            }
+        }
+        ClayTextOnLight(
+            text = label,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Black,
+                fontSize = 9.5.sp
+            ),
+            textColor = ClayDeepTealInk,
+            depthDp = 0.5.dp
+        )
     }
 }

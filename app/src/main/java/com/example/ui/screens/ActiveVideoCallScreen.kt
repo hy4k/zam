@@ -11,6 +11,11 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,9 +43,11 @@ import androidx.compose.material.icons.rounded.BluetoothAudio
 import androidx.compose.material.icons.rounded.Brush
 import androidx.compose.material.icons.rounded.CallEnd
 import androidx.compose.material.icons.rounded.Cameraswitch
+import androidx.compose.material.icons.rounded.Hearing
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MicOff
 import androidx.compose.material.icons.rounded.PersonAdd
+import androidx.compose.material.icons.rounded.PhoneInTalk
 import androidx.compose.material.icons.rounded.SpeakerPhone
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Videocam
@@ -62,27 +69,33 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.R
+import com.example.data.local.UserProfileEntity
 import com.example.data.model.ArFilterType
 import com.example.data.model.AudioRoute
+import com.example.data.model.BadgeElement
 import com.example.data.model.CallParticipantState
 import com.example.data.model.CallPhase
 import com.example.data.model.CallState
 import com.example.data.model.FamilyMemberId
 import com.example.data.model.LiveStroke
 import com.example.data.model.haloColor
+import com.example.media.LiveKitTokenProvider
 import com.example.ui.components.EmojiPhysicsBurstOverlay
 import com.example.ui.components.FamilyMemberAvatar
 import com.example.ui.theme.CrimsonDecline
@@ -92,17 +105,17 @@ import com.example.ui.theme.LocalKinNestAccessibility
 import com.example.ui.theme.MintTreehouse
 import com.example.ui.theme.PurpleChest
 import com.example.ui.theme.WalkieAmber
-import com.example.media.LiveKitTokenProvider
-import com.example.ui.theme.claymorphic
 import com.example.ui.theme.liquidGlass
 import io.livekit.android.renderer.SurfaceViewRenderer
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.VideoTrack
+import livekit.org.webrtc.RendererCommon
 
 @Composable
 fun ActiveVideoCallScreen(
     selfMember: FamilyMemberId,
     callState: CallState,
+    profiles: List<UserProfileEntity>,
     liveKitRoom: Room?,
     isLiveStreamActive: Boolean,
     videoTracksByMember: Map<FamilyMemberId, VideoTrack>,
@@ -138,26 +151,52 @@ fun ActiveVideoCallScreen(
                 PackageManager.PERMISSION_GRANTED
         )
     }
+    var pendingEnableCameraAfterPerm by remember { mutableStateOf(false) }
+    var pendingUnmuteAfterPerm by remember { mutableStateOf(false) }
 
     val permLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
-        hasCameraPerm = result[Manifest.permission.CAMERA] == true || hasCameraPerm
-        hasAudioPerm = result[Manifest.permission.RECORD_AUDIO] == true || hasAudioPerm
-        onMediaPermissionsChanged(hasCameraPerm, hasAudioPerm)
+        val camGranted = result[Manifest.permission.CAMERA] == true || hasCameraPerm
+        val audGranted = result[Manifest.permission.RECORD_AUDIO] == true || hasAudioPerm
+        hasCameraPerm = camGranted
+        hasAudioPerm = audGranted
+        onMediaPermissionsChanged(camGranted, audGranted)
+        if (pendingEnableCameraAfterPerm) {
+            pendingEnableCameraAfterPerm = false
+            if (camGranted && !callState.isLocalCameraOn) {
+                onToggleCamera()
+            }
+        }
+        if (pendingUnmuteAfterPerm) {
+            pendingUnmuteAfterPerm = false
+            if (audGranted && callState.isLocalMicMuted) {
+                onToggleMic()
+            }
+        }
     }
 
-    LaunchedEffect(Unit) {
-        if (!hasCameraPerm || !hasAudioPerm) {
-            permLauncher.launch(
-                arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
-            )
+    // Request only the permissions required by the call mode (Voice Call = Mic only; Video Call = Camera + Mic)
+    LaunchedEffect(callState.isLocalCameraOn) {
+        val needed = buildList {
+            if (!hasAudioPerm) add(Manifest.permission.RECORD_AUDIO)
+            if (callState.isLocalCameraOn && !hasCameraPerm) add(Manifest.permission.CAMERA)
+        }
+        if (needed.isNotEmpty()) {
+            permLauncher.launch(needed.toTypedArray())
         }
     }
 
     val participants = callState.participants.ifEmpty {
         listOf(
-            CallParticipantState(selfMember, isConnected = true, isSpeaking = true, audioLevel = 0.6f)
+            CallParticipantState(
+                memberId = selfMember,
+                isConnected = true,
+                isSpeaking = false,
+                audioLevel = 0.2f,
+                isMuted = callState.isLocalMicMuted,
+                isCameraEnabled = callState.isLocalCameraOn
+            )
         )
     }
     val missingThirdMember = FamilyMemberId.entries.firstOrNull { m ->
@@ -168,11 +207,30 @@ fun ActiveVideoCallScreen(
     val secs = callState.durationSeconds % 60
     val formattedDuration = "%02d:%02d".format(mins, secs)
 
+    val anyVideoActive = callState.isLocalCameraOn || videoTracksByMember.isNotEmpty()
+    val isVoiceStage = !anyVideoActive
+
+    val (audioRouteIcon, audioRouteDesc) = when (callState.audioRoute) {
+        AudioRoute.SPEAKER -> Icons.Rounded.SpeakerPhone to "Speaker"
+        AudioRoute.BLUETOOTH -> Icons.Rounded.BluetoothAudio to "Bluetooth"
+        AudioRoute.EARPIECE -> Icons.Rounded.Hearing to "Earpiece"
+    }
+
+    val stageBgBrush = if (isVoiceStage) {
+        Brush.verticalGradient(
+            listOf(Color(0xFF0E2936), Color(0xFF13394A), Color(0xFF0A1D28))
+        )
+    } else {
+        Brush.verticalGradient(
+            listOf(Color(0xFF070B16), Color(0xFF070B16))
+        )
+    }
+
     // Media Isolation: Deep dark unblurred stage for video feeds so hardware rendering stays cool
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF070B16))
+            .background(stageBgBrush)
             .safeDrawingPadding()
     ) {
         Column(
@@ -206,10 +264,10 @@ fun ActiveVideoCallScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = if (callState.phase is CallPhase.Reconnecting) {
-                                callState.phase.reason
-                            } else {
-                                "Family Live • $formattedDuration"
+                            text = when {
+                                callState.phase is CallPhase.Reconnecting -> callState.phase.reason
+                                isVoiceStage -> "Voice Call • $formattedDuration"
+                                else -> "Video Call • $formattedDuration"
                             },
                             style = MaterialTheme.typography.titleMedium,
                             color = Color.White
@@ -220,7 +278,7 @@ fun ActiveVideoCallScreen(
                             color = if (isLiveStreamActive) EmeraldAccept else WalkieAmber
                         ) {
                             Text(
-                                text = if (isLiveStreamActive) "LIVE" else "READY",
+                                text = if (isLiveStreamActive) "LIVE" else "RINGING",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color.White,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -228,9 +286,9 @@ fun ActiveVideoCallScreen(
                         }
                     }
                     Text(
-                        text = callState.networkQualityLabel,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(alpha = 0.78f),
+                        text = "${callState.networkQualityLabel} • $audioRouteDesc",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.80f),
                         maxLines = 2
                     )
                 }
@@ -254,7 +312,7 @@ fun ActiveVideoCallScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "+ ${missingThirdMember.displayName}",
+                                text = "+ ${missingThirdMember.displayName.substringBefore(" ")}",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = Color.White
                             )
@@ -263,68 +321,95 @@ fun ActiveVideoCallScreen(
                 }
             }
 
-            // Unblurred 3-Way Split Video Grid (Active Speaker + Concurrent Full-Duplex)
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                val allowOfflineCameraPreview = remember {
-                    !LiveKitTokenProvider.isLiveKitUrlConfigured()
-                }
-                val primary = participants.first()
-                key(primary.memberId) {
-                    VideoParticipantTile(
-                        participant = primary,
-                        isLocalSelf = primary.memberId == selfMember,
-                        liveKitRoom = liveKitRoom,
-                        liveVideoTrack = videoTracksByMember[primary.memberId],
-                        isLiveStreamActive = isLiveStreamActive,
-                        allowOfflineCameraPreview = allowOfflineCameraPreview && callState.phase is CallPhase.Active,
-                        isMemberJoinedLive = primary.memberId in connectedLiveMembers,
-                        hasCameraPerm = hasCameraPerm,
-                        isCameraOn = callState.isLocalCameraOn,
-                        isFrontCamera = callState.isFrontCamera,
-                        tapPulseActive = callState.screenTapPulseMember == primary.memberId,
-                        modifier = Modifier
-                            .weight(1.25f)
-                            .fillMaxWidth()
-                    )
-                }
+            // Main Stage: Seamless Live Voice Stage OR Unblurred 3-Way Split Video Grid
+            if (isVoiceStage) {
+                LiveVoiceCallStage(
+                    selfMember = selfMember,
+                    participants = participants,
+                    profiles = profiles,
+                    isLiveStreamActive = isLiveStreamActive,
+                    connectedLiveMembers = connectedLiveMembers,
+                    tapPulseMember = callState.screenTapPulseMember,
+                    reducedMotion = a11y.reducedMotion,
+                    onUpgradeToVideo = {
+                        if (!hasCameraPerm) {
+                            pendingEnableCameraAfterPerm = true
+                            permLauncher.launch(arrayOf(Manifest.permission.CAMERA))
+                        } else {
+                            onToggleCamera()
+                        }
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    val allowOfflineCameraPreview = remember {
+                        !LiveKitTokenProvider.isLiveKitUrlConfigured()
+                    }
+                    val primary = participants.first()
+                    val primaryProfile = profiles.firstOrNull { it.memberId == primary.memberId.name }
+                    key(primary.memberId) {
+                        VideoParticipantTile(
+                            participant = primary,
+                            profile = primaryProfile,
+                            isLocalSelf = primary.memberId == selfMember,
+                            liveKitRoom = liveKitRoom,
+                            liveVideoTrack = videoTracksByMember[primary.memberId],
+                            isLiveStreamActive = isLiveStreamActive,
+                            allowOfflineCameraPreview = allowOfflineCameraPreview && callState.phase is CallPhase.Active,
+                            isMemberJoinedLive = primary.memberId in connectedLiveMembers,
+                            hasCameraPerm = hasCameraPerm,
+                            isCameraOn = if (primary.memberId == selfMember) callState.isLocalCameraOn else primary.isCameraEnabled,
+                            isFrontCamera = callState.isFrontCamera,
+                            tapPulseActive = callState.screenTapPulseMember == primary.memberId,
+                            modifier = Modifier
+                                .weight(1.25f)
+                                .fillMaxWidth()
+                        )
+                    }
 
-                if (participants.size > 1) {
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        participants.drop(1).forEach { p ->
-                            key(p.memberId) {
-                                VideoParticipantTile(
-                                    participant = p,
-                                    isLocalSelf = p.memberId == selfMember,
-                                    liveKitRoom = liveKitRoom,
-                                    liveVideoTrack = videoTracksByMember[p.memberId],
-                                    isLiveStreamActive = isLiveStreamActive,
-                                    allowOfflineCameraPreview = allowOfflineCameraPreview && callState.phase is CallPhase.Active,
-                                    isMemberJoinedLive = p.memberId in connectedLiveMembers,
-                                    hasCameraPerm = hasCameraPerm,
-                                    isCameraOn = if (p.memberId == selfMember) callState.isLocalCameraOn else p.isCameraEnabled,
-                                    isFrontCamera = callState.isFrontCamera,
-                                    tapPulseActive = callState.screenTapPulseMember == p.memberId,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxSize()
-                                )
+                    if (participants.size > 1) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            participants.drop(1).forEach { p ->
+                                val prof = profiles.firstOrNull { it.memberId == p.memberId.name }
+                                key(p.memberId) {
+                                    VideoParticipantTile(
+                                        participant = p,
+                                        profile = prof,
+                                        isLocalSelf = p.memberId == selfMember,
+                                        liveKitRoom = liveKitRoom,
+                                        liveVideoTrack = videoTracksByMember[p.memberId],
+                                        isLiveStreamActive = isLiveStreamActive,
+                                        allowOfflineCameraPreview = allowOfflineCameraPreview && callState.phase is CallPhase.Active,
+                                        isMemberJoinedLive = p.memberId in connectedLiveMembers,
+                                        hasCameraPerm = hasCameraPerm,
+                                        isCameraOn = if (p.memberId == selfMember) callState.isLocalCameraOn else p.isCameraEnabled,
+                                        isFrontCamera = callState.isFrontCamera,
+                                        tapPulseActive = callState.screenTapPulseMember == p.memberId,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxSize()
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // In-Call Interactive Fun Strip: AR Filters, Emoji Physics Triggers, Tap Ripple, Drawing Toggle
+            // In-Call Interactive Fun Strip: AR Filters (in video mode) + Emoji Physics Triggers
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -332,31 +417,33 @@ fun ActiveVideoCallScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ArFilterType.entries.forEach { filter ->
-                    val selected = callState.activeFilter == filter
-                    Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = if (selected) PurpleChest else Color.White.copy(alpha = 0.16f),
-                        modifier = Modifier
-                            .height(44.dp)
-                            .clickable { onSelectArFilter(filter) }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                if (!isVoiceStage) {
+                    ArFilterType.entries.forEach { filter ->
+                        val selected = callState.activeFilter == filter
+                        Surface(
+                            shape = RoundedCornerShape(18.dp),
+                            color = if (selected) PurpleChest else Color.White.copy(alpha = 0.16f),
+                            modifier = Modifier
+                                .height(44.dp)
+                                .clickable { onSelectArFilter(filter) }
                         ) {
-                            Text(text = filter.emoji, fontSize = 18.sp)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = filter.label,
-                                style = MaterialTheme.typography.labelLarge,
-                                color = Color.White
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = filter.emoji, fontSize = 18.sp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = filter.label,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
                 }
 
-                listOf("🚀", "💖", "😂", "🦕").forEach { emoji ->
+                listOf("🚀", "💖", "😂", "🦕", "👋", "🎉").forEach { emoji ->
                     Surface(
                         shape = CircleShape,
                         color = Color.White.copy(alpha = 0.18f),
@@ -372,7 +459,7 @@ fun ActiveVideoCallScreen(
                 }
             }
 
-            // Lower-Third Clay Controls (56dp+ targets for Zayn & Parents)
+            // Lower-Third Clay Controls (48dp+ accessible targets for Zayn & Parents)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -389,31 +476,44 @@ fun ActiveVideoCallScreen(
             ) {
                 CallClayControlButton(
                     icon = if (callState.isLocalMicMuted) Icons.Rounded.MicOff else Icons.Rounded.Mic,
-                    contentDescription = "Mute microphone",
+                    contentDescription = if (callState.isLocalMicMuted) "Unmute microphone" else "Mute microphone",
                     color = if (callState.isLocalMicMuted) WalkieAmber else Color.White.copy(alpha = 0.22f),
                     testTag = "call_mute_button",
-                    onClick = onToggleMic
+                    onClick = {
+                        if (callState.isLocalMicMuted && !hasAudioPerm) {
+                            pendingUnmuteAfterPerm = true
+                            permLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+                        } else {
+                            onToggleMic()
+                        }
+                    }
                 )
                 CallClayControlButton(
                     icon = if (callState.isLocalCameraOn) Icons.Rounded.Videocam else Icons.Rounded.VideocamOff,
-                    contentDescription = "Toggle camera",
+                    contentDescription = if (callState.isLocalCameraOn) "Turn camera off" else "Turn camera on",
                     color = if (!callState.isLocalCameraOn) WalkieAmber else Color.White.copy(alpha = 0.22f),
                     testTag = "call_camera_button",
-                    onClick = onToggleCamera
+                    onClick = {
+                        if (!callState.isLocalCameraOn && !hasCameraPerm) {
+                            pendingEnableCameraAfterPerm = true
+                            permLauncher.launch(arrayOf(Manifest.permission.CAMERA))
+                        } else {
+                            onToggleCamera()
+                        }
+                    }
                 )
+                if (callState.isLocalCameraOn) {
+                    CallClayControlButton(
+                        icon = Icons.Rounded.Cameraswitch,
+                        contentDescription = "Flip camera",
+                        color = Color.White.copy(alpha = 0.22f),
+                        testTag = "call_flip_camera_button",
+                        onClick = onFlipCamera
+                    )
+                }
                 CallClayControlButton(
-                    icon = Icons.Rounded.Cameraswitch,
-                    contentDescription = "Flip camera",
-                    color = Color.White.copy(alpha = 0.22f),
-                    testTag = "call_flip_camera_button",
-                    onClick = onFlipCamera
-                )
-                CallClayControlButton(
-                    icon = when (callState.audioRoute) {
-                        AudioRoute.BLUETOOTH -> Icons.Rounded.BluetoothAudio
-                        else -> Icons.Rounded.SpeakerPhone
-                    },
-                    contentDescription = "Audio route",
+                    icon = audioRouteIcon,
+                    contentDescription = "Switch audio route ($audioRouteDesc)",
                     color = MintTreehouse.copy(alpha = 0.78f),
                     testTag = "call_audio_route_button",
                     onClick = onCycleAudioRoute
@@ -425,13 +525,15 @@ fun ActiveVideoCallScreen(
                     testTag = "call_tap_pulse_button",
                     onClick = onTriggerScreenTap
                 )
-                CallClayControlButton(
-                    icon = Icons.Rounded.Brush,
-                    contentDescription = "In-call drawing overlay",
-                    color = if (callState.showLiveDrawingOverlay) PurpleChest else Color.White.copy(alpha = 0.22f),
-                    testTag = "call_drawing_overlay_button",
-                    onClick = onToggleDrawingOverlay
-                )
+                if (!isVoiceStage) {
+                    CallClayControlButton(
+                        icon = Icons.Rounded.Brush,
+                        contentDescription = "In-call drawing overlay",
+                        color = if (callState.showLiveDrawingOverlay) PurpleChest else Color.White.copy(alpha = 0.22f),
+                        testTag = "call_drawing_overlay_button",
+                        onClick = onToggleDrawingOverlay
+                    )
+                }
                 CallClayControlButton(
                     icon = Icons.Rounded.CallEnd,
                     contentDescription = "End family call",
@@ -502,8 +604,179 @@ fun ActiveVideoCallScreen(
 }
 
 @Composable
+private fun LiveVoiceCallStage(
+    selfMember: FamilyMemberId,
+    participants: List<CallParticipantState>,
+    profiles: List<UserProfileEntity>,
+    isLiveStreamActive: Boolean,
+    connectedLiveMembers: Set<FamilyMemberId>,
+    tapPulseMember: FamilyMemberId?,
+    reducedMotion: Boolean,
+    onUpgradeToVideo: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val infinite = rememberInfiniteTransition(label = "voice_pulse")
+    val pulseScale by infinite.animateFloat(
+        initialValue = 1.0f,
+        targetValue = if (reducedMotion) 1.0f else 1.14f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "voice_ring_scale"
+    )
+
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(28.dp))
+            .background(Color.White.copy(alpha = 0.06f))
+            .border(1.5.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(28.dp))
+            .padding(16.dp)
+            .testTag("voice_call_stage"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceEvenly
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.PhoneInTalk,
+                contentDescription = null,
+                tint = EmeraldAccept,
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text = "Full-Duplex Family Voice Room",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            participants.forEach { p ->
+                val prof = profiles.firstOrNull { it.memberId == p.memberId.name }
+                val badge = runCatching {
+                    BadgeElement.valueOf(prof?.badgeElement ?: BadgeElement.STARLIGHT.name)
+                }.getOrDefault(BadgeElement.STARLIGHT)
+                val halo = p.memberId.haloColor()
+                val isSelf = p.memberId == selfMember
+                val isJoined = isSelf || (p.memberId in connectedLiveMembers) || p.isConnected
+                val isPulsing = p.isSpeaking || tapPulseMember == p.memberId
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        if (isPulsing) {
+                            Box(
+                                modifier = Modifier
+                                    .size(106.dp)
+                                    .graphicsLayer {
+                                        scaleX = pulseScale
+                                        scaleY = pulseScale
+                                    }
+                                    .clip(CircleShape)
+                                    .background(halo.copy(alpha = 0.24f))
+                                    .border(2.5.dp, halo.copy(alpha = 0.78f), CircleShape)
+                            )
+                        }
+                        FamilyMemberAvatar(
+                            member = p.memberId,
+                            customPhotoUri = prof?.customPhotoUri,
+                            badge = badge,
+                            size = 86.dp,
+                            showBadge = true
+                        )
+                        if (p.isMuted) {
+                            Surface(
+                                shape = CircleShape,
+                                color = CrimsonDecline,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(26.dp)
+                                    .border(2.dp, Color(0xFF0E2936), CircleShape)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.MicOff,
+                                        contentDescription = "Muted",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = if (isSelf) "${p.memberId.displayName.substringBefore(" ")} (You)" else p.memberId.displayName.substringBefore(" "),
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White
+                    )
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        AudioWaveformBars(
+                            level = if (p.isMuted || !isJoined) 0f else p.audioLevel,
+                            barColor = halo
+                        )
+                        Text(
+                            text = when {
+                                p.isMuted -> "Muted"
+                                !isSelf && isLiveStreamActive && !isJoined -> "Ringing…"
+                                p.isSpeaking -> "Speaking"
+                                else -> "Connected"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.78f)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Seamless 1-tap upgrade from Voice Call to Live Video Call
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = Color.White.copy(alpha = 0.14f),
+            modifier = Modifier
+                .clickable(onClick = onUpgradeToVideo)
+                .testTag("upgrade_voice_to_video_button")
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Videocam,
+                    contentDescription = "Switch to video",
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = "Tap to turn on Camera",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun VideoParticipantTile(
     participant: CallParticipantState,
+    profile: UserProfileEntity?,
     isLocalSelf: Boolean,
     liveKitRoom: Room?,
     liveVideoTrack: VideoTrack?,
@@ -517,6 +790,10 @@ private fun VideoParticipantTile(
     modifier: Modifier = Modifier
 ) {
     val halo = participant.memberId.haloColor()
+    val badge = runCatching {
+        BadgeElement.valueOf(profile?.badgeElement ?: BadgeElement.STARLIGHT.name)
+    }.getOrDefault(BadgeElement.STARLIGHT)
+
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(26.dp))
@@ -554,6 +831,8 @@ private fun VideoParticipantTile(
                 ) {
                     FamilyMemberAvatar(
                         member = participant.memberId,
+                        customPhotoUri = profile?.customPhotoUri,
+                        badge = badge,
                         size = 86.dp
                     )
                     if (isLiveStreamActive && !isLocalSelf && !isMemberJoinedLive) {
@@ -565,6 +844,18 @@ private fun VideoParticipantTile(
                                 text = "Ringing • Waiting to join…",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color.White,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    } else if (!isCameraOn) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color.Black.copy(alpha = 0.45f)
+                        ) {
+                            Text(
+                                text = "Camera off • Voice active",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.88f),
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                             )
                         }
@@ -584,6 +875,27 @@ private fun VideoParticipantTile(
             )
         }
 
+        // Muted indicator pill in top-right corner
+        if (participant.isMuted) {
+            Surface(
+                shape = CircleShape,
+                color = CrimsonDecline,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(10.dp)
+                    .size(28.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Rounded.MicOff,
+                        contentDescription = "${participant.memberId.displayName} is muted",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+
         // Audio Waveform + Name Pill
         Row(
             modifier = Modifier
@@ -600,7 +912,10 @@ private fun VideoParticipantTile(
                 color = Color.White
             )
             Spacer(modifier = Modifier.width(8.dp))
-            AudioWaveformBars(level = participant.audioLevel, barColor = halo)
+            AudioWaveformBars(
+                level = if (participant.isMuted) 0f else participant.audioLevel,
+                barColor = halo
+            )
         }
     }
 }
@@ -632,21 +947,21 @@ private fun CallClayControlButton(
     testTag: String,
     onClick: () -> Unit
 ) {
-    Box(
-        modifier = Modifier
-            .size(56.dp)
-            .claymorphic(cornerRadius = 28.dp, surfaceColor = color, elevation = 8.dp)
-            .clickable(onClick = onClick)
-            .testTag(testTag),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = Color.White,
-            modifier = Modifier.size(26.dp)
-        )
+    val resolvedPlush = if (color.alpha < 0.45f) {
+        com.example.ui.theme.PlushCobalt
+    } else {
+        color
     }
+    com.example.ui.components.PlushCircleButton(
+        icon = icon,
+        contentDescription = contentDescription,
+        plushColor = resolvedPlush,
+        iconTint = Color.White,
+        size = 48.dp,
+        furLength = 4.dp,
+        testTag = testTag,
+        onClick = onClick
+    )
 }
 
 @Composable
@@ -716,6 +1031,7 @@ private fun LiveKitVideoRendererView(
         runCatching {
             room.initVideoRenderer(view)
             view.setEnableHardwareScaler(true)
+            view.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
         }
         view
     }

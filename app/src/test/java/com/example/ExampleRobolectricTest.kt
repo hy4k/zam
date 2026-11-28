@@ -2,25 +2,28 @@ package com.example
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.example.data.model.FamilyMemberId
 import com.example.security.DeviceKeystoreManager
 import com.example.security.ParentalAuthManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34])
 class ExampleRobolectricTest {
 
   @Test
-  fun `app name matches KinNest`() {
+  fun `app name matches Holy Moly`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val appName = context.getString(R.string.app_name)
-    assertEquals("KinNest", appName)
+    assertEquals("Holy Moly !", appName)
   }
 
   @Test
@@ -41,5 +44,22 @@ class ExampleRobolectricTest {
     val (ciphertext, iv) = keystore.encryptMessageForLocalVault(sample)
     val decrypted = keystore.decryptMessageFromLocalVault(ciphertext, iv)
     assertEquals(sample, decrypted)
+  }
+
+  @Test
+  fun `MainActivity launches cleanly on login and logged-in workspace`() {
+    val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+    assertNotNull(controller.get())
+    controller.pause().stop().destroy()
+
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    context.getSharedPreferences("holymoly_device_binding", Context.MODE_PRIVATE)
+      .edit()
+      .putString("logged_in_member_v2", FamilyMemberId.MITHUN.name)
+      .commit()
+
+    val loggedInController = Robolectric.buildActivity(MainActivity::class.java).setup()
+    assertNotNull(loggedInController.get())
+    loggedInController.pause().stop().destroy()
   }
 }
