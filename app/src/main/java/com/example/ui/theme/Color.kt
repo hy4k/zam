@@ -3,62 +3,85 @@ package com.example.ui.theme
 import androidx.compose.ui.graphics.Color
 
 // =============================================================================
-// Holy Moly ! — Pixar-Style 3D Matte Claymorphism & Clay-Glass Palette
-// Directly sampled from the attached studio clay illustration:
-// Mint-Teal studio wall, Warm Peach-Cream clay discs, Molded Aqua, Watermelon Coral,
-// Honey-Tangerine Gold, and 3D Extruded Cream-White & Deep-Teal Ink typography.
+// Holy Moly ! — Vibrant 3D Clay Studio Palette (iOS-Smooth Edition)
+// Directly sampled from the 3 attached vibrant 3D clay reference images:
+//   - Juicy Tangerine Orange (#FF881B) & Sunny Mango (#FFB854)
+//   - Electric Sky Cyan (#18C1EE) & Bright Ice Highlight (#6CE4FF)
+//   - Playful Periwinkle Lavender (#9675FF) & Soft Lilac (#C4B0FF)
+//   - Joyful Coral Pink (#FF5E6B) & Warm Peach Clay (#FFE0C8)
+//   - Fresh Mint Teal (#22C9A6) on an airy pastel aqua-to-lavender canvas
 // =============================================================================
 
-// Studio Matte Mint-Teal Backdrop
-val ClayTealWallTop = Color(0xFF5EB3AF)         // Soft sunlit studio teal top
-val ClayTealWallMid = Color(0xFF7CD0C9)         // Signature bright mint-teal clay wall
-val ClayTealWallBottom = Color(0xFF69BEB8)      // Balanced lower teal wall
-val ClayTealShadow = Color(0xFF236668)          // Crisp directional studio cast shadow
+// Warm Studio Backdrop Accents (for doorway/call overlays)
+val AtelierDeskDarkTop = Color(0xFF162438)
+val AtelierDeskDarkMid = Color(0xFF101B2B)
+val AtelierDeskDarkBottom = Color(0xFF0B1320)
+val AtelierLampGlow = Color(0xFFFFD88A)
+val AtelierWoodFrameLight = Color(0xFF7ADCF5)
+val AtelierWoodFrameMid = Color(0xFF3DA7C7)
+val AtelierWoodFrameDeep = Color(0xFF1A5E7A)
+val AtelierDoorInterior = Color(0xFF0E1B2B)
+val AtelierBrassHandle = Color(0xFFFFC15E)
+val AtelierRedPresenceDot = Color(0xFFFF5263)
 
-// Warm Peach-Cream Sculpted Clay Discs & Cards (the 6 floating discs in reference!)
-val ClayPeachLight = Color(0xFFFFEFE0)          // Sunlit peach-cream top highlight
-val ClayPeach = Color(0xFFFDD8BA)               // Signature matte peach clay disc
-val ClayPeachDeep = Color(0xFFE3A982)           // Molded 3D lower peach rim
+// Luminous Pastel Aqua-to-Lavender 3D Clay Studio Canvas
+val ClayTealWallTop = Color(0xFFEBFBF9)         // Airy sunlit mint-aqua mist
+val ClayTealWallMid = Color(0xFFE4F5FA)         // Crisp sky-aqua studio canvas
+val ClayTealWallBottom = Color(0xFFEDE9FF)      // Soft pastel lavender-cloud base
+val ClayTealShadow = Color(0xFF23476B)          // Clean cool studio ambient shadow
 
-// Soft Vanilla-Cream Porcelain Clay (studio floor & airy trays)
-val ClayVanillaLight = Color(0xFFFFFBF4)        // Bright cream clay top
-val ClayVanilla = Color(0xFFFFF1DC)             // Warm matte vanilla clay
-val ClayVanillaDeep = Color(0xFFE2C8A8)         // Molded cream bevel
+// Warm Peach / Apricot 3D Clay Cards & Circular Badges (from Reference Image 2)
+val ClayPeachLight = Color(0xFFFFF3E8)          // Bright creamy apricot highlight
+val ClayPeach = Color(0xFFFFE1C9)               // Signature soft peach clay disc/card
+val ClayPeachDeep = Color(0xFFF2B68B)           // Sculpted warm peach bevel
 
-// Signature 3D Molded Toybox Clay Accents (from outfit, icons, mug, cap, apple)
-val ClayAquaLight = Color(0xFF7EDCD9)           // Bright sculpted aqua top
-val ClayAqua = Color(0xFF4AB5B6)                // Signature turquoise-aqua clay
-val ClayAquaDeep = Color(0xFF277F84)            // Deep 3D aqua molded base
+// Crisp Porcelain White Elevated 3D Surfaces (from Reference Images 1 & 3)
+val ClayVanillaLight = Color(0xFFFFFFFF)        // Pure sunlit iOS porcelain white
+val ClayVanilla = Color(0xFFF4FAFF)             // Soft airy ice-white card
+val ClayVanillaDeep = Color(0xFFD2E5F6)         // Delicate sky-frost bevel rim
 
-val ClayCoralLight = Color(0xFFFF9889)          // Bright coral-peach top
-val ClayCoral = Color(0xFFF0675A)               // Watermelon coral clay (overalls/backpack)
-val ClayCoralDeep = Color(0xFFC24038)           // Deep 3D coral molded base
+// Electric Sky Cyan 3D Block (from Reference Images 1 & 3 middle tile)
+val ClayAquaLight = Color(0xFF6CE4FF)           // Bright glossy cyan rim
+val ClayAqua = Color(0xFF18C1EE)                // Vibrant electric sky cyan
+val ClayAquaDeep = Color(0xFF0985B2)            // Rich ocean-cyan 3D bevel
 
-val ClayHoneyLight = Color(0xFFFFD56E)          // Sunlit honey-yellow top (cap/coins)
-val ClayHoney = Color(0xFFF7A633)               // Warm honey-tangerine clay (mug/bear/bulb)
-val ClayHoneyDeep = Color(0xFFCB7514)           // Deep 3D honey molded base
+// Joyful Coral Pink / Strawberry 3D Block (from Reference Image 2)
+val ClayCoralLight = Color(0xFFFF989E)          // Bright rosy coral highlight
+val ClayCoral = Color(0xFFFF5E6B)               // Vibrant playful coral pink
+val ClayCoralDeep = Color(0xFFD6364A)           // Deep berry-coral 3D bevel
 
-val ClaySageLight = Color(0xFF6CD6AD)           // Soft mint-emerald highlight
-val ClaySage = Color(0xFF33B389)                // Online & Accept emerald clay
-val ClaySageDeep = Color(0xFF1A7F5F)            // Deep emerald base
+// Juicy Tangerine Orange / Mango 3D Block (from Reference Images 1 & 3 top tile)
+val ClayHoneyLight = Color(0xFFFFBD59)          // Sunny mango highlight
+val ClayHoney = Color(0xFFFF881B)               // Vibrant tangerine orange
+val ClayHoneyDeep = Color(0xFFD15700)           // Deep marmalade 3D bevel
 
-// 3D Extruded Typography & Guaranteed-Contrast Ink Tokens
-val ClayTextCream = Color(0xFFFFF9F2)           // Front face of "What is a feeling?" 3D text
-val ClayTextPeachExtrude = Color(0xFFEBA886)    // Warm peach 3D side extrusion for titles
-val ClayTextTealCast = Color(0xFF1F5D61)        // Studio cast shadow on teal
-val ClayDeepTealInk = Color(0xFF15494E)         // Ultra-crisp dark teal text on Peach/Vanilla cards
-val ClayCocoaInk = Color(0xFF3A2620)            // Warm espresso ink (hair/eyes) for maximum clarity
-val ClayMutedInk = Color(0xFF3D6F73)            // Muted readable teal-slate on light clay
+// Fresh Mint Aqua / Emerald 3D Block (from Reference Image 2 backdrop & live green)
+val ClaySageLight = Color(0xFF6CEAD0)           // Bright seafoam mint highlight
+val ClaySage = Color(0xFF1FC7A4)                // Vibrant fresh mint teal
+val ClaySageDeep = Color(0xFF0C8F74)            // Deep emerald-teal 3D bevel
 
-// Dark Twilight Mint-Teal Clay Theme
-val DarkBackgroundTop = Color(0xFF16373B)
-val DarkBackgroundBottom = Color(0xFF1E4C50)
-val DarkSurfaceClay = Color(0xFF23575C)
-val DarkOnSurface = Color(0xFFFFF8F0)
-val DarkOnSurfaceMuted = Color(0xFFC7E8E5)
+// Playful Periwinkle Lavender 3D Block (from Reference Images 1 & 3 bottom tile)
+val VibrantVioletTop = Color(0xFFC5B2FF)
+val VibrantViolet = Color(0xFF9675FF)
+val VibrantVioletDeep = Color(0xFF6745D6)
+
+// Crisp iPhone-Grade High-Contrast Ink Tokens
+val ClayTextCream = Color(0xFFFFFFFF)           // Crisp white text on vibrant 3D tiles
+val ClayTextPeachExtrude = Color(0xFF1C3A5E)    // Clean depth shadow behind white display text
+val ClayTextTealCast = Color(0xFF102840)        // Soft cast shadow for 3D headlines
+val ClayDeepTealInk = Color(0xFF13263C)         // Deep midnight-teal primary ink (high contrast!)
+val ClayCocoaInk = Color(0xFF284360)            // Secondary crisp slate-navy ink
+val ClayMutedInk = Color(0xFF5D7792)            // Refined cool muted caption ink
+
+// Sleek Vibrant iOS Dark Theme
+val DarkBackgroundTop = Color(0xFF11192A)
+val DarkBackgroundBottom = Color(0xFF19243B)
+val DarkSurfaceClay = Color(0xFF22304C)
+val DarkOnSurface = Color(0xFFF4F8FF)
+val DarkOnSurfaceMuted = Color(0xFFAEBEDA)
 
 // =============================================================================
-// Semantic & Compatibility Token Mapping (keeps every file harmonious)
+// Semantic & Compatibility Token Mapping (100% cohesive across all screens)
 // =============================================================================
 val VibrantOrangeTop = ClayHoneyLight
 val VibrantOrange = ClayHoney
@@ -68,10 +91,6 @@ val VibrantCyanTop = ClayAquaLight
 val VibrantCyan = ClayAqua
 val VibrantCyanDeep = ClayAquaDeep
 
-val VibrantVioletTop = ClayCoralLight
-val VibrantViolet = ClayCoral
-val VibrantVioletDeep = ClayCoralDeep
-
 val VibrantMagentaTop = ClayCoralLight
 val VibrantMagenta = ClayCoral
 val VibrantMagentaDeep = ClayCoralDeep
@@ -80,9 +99,9 @@ val VibrantMintTop = ClaySageLight
 val VibrantMint = ClaySage
 val VibrantMintDeep = ClaySageDeep
 
-val VibrantYellowTop = ClayHoneyLight
-val VibrantYellow = ClayHoney
-val VibrantYellowDeep = ClayHoneyDeep
+val VibrantYellowTop = Color(0xFFFFDF73)
+val VibrantYellow = Color(0xFFFFB82E)
+val VibrantYellowDeep = Color(0xFFD68600)
 
 val PlushCobaltLight = ClayAquaLight
 val PlushCobalt = ClayAqua
@@ -115,45 +134,45 @@ val VibrantBackdropMid = ClayTealWallMid
 val VibrantBackdropLow = ClayTealWallBottom
 val VibrantBackdropWarm = ClayVanilla
 
-val Text3DShadowDark = Color(0x66174B4F)
+val Text3DShadowDark = Color(0x3D102840)
 val Text3DExtrudeTint = ClayTextPeachExtrude
 
-val PastelSkyPink = ClayPeach
-val PastelSkyLavender = ClayTealWallMid
-val PastelSkyPeach = ClayVanilla
+val PastelSkyPink = Color(0xFFFFE4EC)
+val PastelSkyLavender = Color(0xFFECE6FF)
+val PastelSkyPeach = ClayPeach
 val PastelSkyCream = ClayVanillaLight
 
 val ClayBlushCard = ClayPeach
 val ClayButterCard = ClayVanilla
 val ClayButterSoft = ClayVanillaLight
-val ClayLavenderCard = ClayPeach
-val ClayPinkMistCard = ClayPeach
+val ClayLavenderCard = Color(0xFFECE6FF)
+val ClayPinkMistCard = Color(0xFFFFE5EC)
 val ClaySeafoamCard = ClayAqua
 
 val AmalfiBerry = ClayCoral
 val AmalfiBerryDeep = ClayCoralDeep
 val CoralRoseLight = ClayCoralLight
 val CoralRose = ClayCoral
-val WisteriaLight = ClayAquaLight
-val WisteriaCore = ClayAqua
-val WisteriaDeep = ClayAquaDeep
+val WisteriaLight = VibrantVioletTop
+val WisteriaCore = VibrantViolet
+val WisteriaDeep = VibrantVioletDeep
 val ApricotLight = ClayHoneyLight
 val ApricotCore = ClayHoney
 val ApricotDeep = ClayHoneyDeep
-val SeafoamLight = ClayAquaLight
-val SeafoamCore = ClayAqua
-val SeafoamDeep = ClayAquaDeep
+val SeafoamLight = ClaySageLight
+val SeafoamCore = ClaySage
+val SeafoamDeep = ClaySageDeep
 
 val CoastalInk = ClayDeepTealInk
 val PlumInk = ClayCocoaInk
 val SoftPlumMuted = ClayMutedInk
 
-// Bottom Dock 4 Sculpted Clay Medallions
-val TabLightHome = ClayCoral            // Buzz — Watermelon Coral Clay
-val TabLightCall = ClayAqua             // Ring — Molded Aqua Clay
-val TabLightChat = ClayHoney            // Chatter — Honey-Tangerine Clay
-val TabLightPlay = ClaySage             // Play — Mint-Emerald Clay
-val TabLightUs = ClayCoral
+// Bottom Dock 4 Vibrant 3D Candy Medallions
+val TabLightHome = ClayAqua             // Radio — Electric Sky Cyan
+val TabLightCall = ClayCoral            // Calls — Joyful Coral Pink
+val TabLightChat = ClayHoney            // Chat — Juicy Tangerine Orange
+val TabLightPlay = VibrantViolet        // Play — Playful Periwinkle Lavender
+val TabLightUs = ClaySage
 
 val StudioTeal = ClayAqua
 val StudioTealDeep = ClayAquaDeep
@@ -170,9 +189,9 @@ val OchreGoldSoft = ClayVanilla
 val PowderSky = ClayAquaLight
 val PowderSkyDeep = ClayAqua
 
-val PeriwinklePop = ClayAqua
+val PeriwinklePop = VibrantViolet
 val OrchidPink = ClayCoral
-val CitrusLime = ClayHoneyLight
+val CitrusLime = ClaySageLight
 
 val MintTreehouse = ClaySage
 val MintTreehouseDeep = ClaySageDeep
@@ -184,18 +203,18 @@ val ElectricRocketSoft = ClayAquaLight
 val BubblePink = ClayCoral
 val BubblePinkSoft = ClayCoralLight
 
-val PurpleChest = ClayHoney
-val PurpleChestSoft = ClayHoneyLight
+val PurpleChest = VibrantViolet
+val PurpleChestSoft = VibrantVioletTop
 
-val ConstellationGold = ClayHoney
-val ConstellationSoft = ClayHoneyLight
+val ConstellationGold = VibrantYellow
+val ConstellationSoft = VibrantYellowTop
 
 val WalkieAmber = ClayHoney
 val WalkieAmberDeep = ClayCoral
-val EmeraldAccept = ClaySage
+val EmeraldAccept = Color(0xFF1CC98A)
 val CrimsonDecline = ClayCoral
 
-// Per-Member Dynamic Halos (harmonized to the studio clay illustration)
+// Per-Member Vibrant Halos
 val MithunSkyHalo = ClayAqua
 val MafithaRoseHalo = ClayCoral
 val ZaynSunHalo = ClayHoney
@@ -203,6 +222,6 @@ val ZaynSunHalo = ClayHoney
 // Light Theme Canvas & Surface Tokens
 val LightBackgroundTop = ClayTealWallTop
 val LightBackgroundBottom = ClayTealWallBottom
-val LightSurfaceClay = ClayPeach
+val LightSurfaceClay = ClayVanillaLight
 val LightOnSurface = ClayDeepTealInk
 val LightOnSurfaceMuted = ClayMutedInk

@@ -371,7 +371,7 @@ fun PlayChestScreen(
                             val online = memberPresence[member]?.isOnline == true
                             val pillColor = when (assignedMark) {
                                 XoxoMark.X -> ClayPeach
-                                XoxoMark.O -> Color(0xFFD6F2F0)
+                                XoxoMark.O -> Color(0xFFE7DDD0)
                                 null -> ClayVanillaLight
                             }
                             val badgeColor = when (assignedMark) {
@@ -427,7 +427,7 @@ fun PlayChestScreen(
                                         modifier = Modifier
                                             .size(7.dp)
                                             .clip(CircleShape)
-                                            .background(if (online) EmeraldAccept else Color(0xFFAABFC1))
+                                            .background(if (online) EmeraldAccept else Color(0xFFA89989))
                                     )
                                     ClayTextOnLight(
                                         text = member.title,
@@ -450,7 +450,7 @@ fun PlayChestScreen(
                                                     fontWeight = FontWeight.ExtraBold,
                                                     fontSize = 10.sp
                                                 ),
-                                                extrudeColor = Color(0x45174B4F),
+                                                extrudeColor = Color(0x452A170C),
                                                 depthDp = 0.8.dp,
                                                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                                             )
@@ -521,7 +521,7 @@ fun PlayChestScreen(
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.ExtraBold
                     ),
-                    extrudeColor = Color(0x55184B4F),
+                    extrudeColor = Color(0x552A170C),
                     depthDp = 1.6.dp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -632,7 +632,7 @@ private fun PlayGameSwitcherPill(
                 Text3D(
                     text = label,
                     style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold),
-                    extrudeColor = Color(0x50174B4F),
+                    extrudeColor = Color(0x502A170C),
                     depthDp = 1.dp,
                     maxLines = 1
                 )
@@ -682,7 +682,7 @@ private fun ClayModePill(
                 Text3D(
                     text = label,
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold),
-                    extrudeColor = Color(0x45174B4F),
+                    extrudeColor = Color(0x452A170C),
                     depthDp = 0.8.dp
                 )
             } else {
@@ -759,7 +759,7 @@ private fun StudioClayXoxoPlayerTile(
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 11.5.sp
                     ),
-                    extrudeColor = Color(0x55184B4F),
+                    extrudeColor = Color(0x552A170C),
                     depthDp = 1.dp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -771,7 +771,7 @@ private fun StudioClayXoxoPlayerTile(
                         fontSize = 13.5.sp
                     ),
                     textColor = ClayVanillaLight,
-                    extrudeColor = Color(0x55184B4F),
+                    extrudeColor = Color(0x552A170C),
                     depthDp = 1.1.dp
                 )
             }
@@ -949,13 +949,13 @@ private fun StudioClayXoxoCell(
                     if (p1 > 0f) {
                         val s1 = Offset(0f, 0f)
                         val e1 = Offset(size.width * p1, size.height * p1)
-                        drawLine(Color(0x451A484C), s1 + Offset(0f, shadowOffset), e1 + Offset(0f, shadowOffset), strokeWidth = strokeShadow, cap = StrokeCap.Round)
+                        drawLine(Color(0x452B190E), s1 + Offset(0f, shadowOffset), e1 + Offset(0f, shadowOffset), strokeWidth = strokeShadow, cap = StrokeCap.Round)
                         drawLine(ClayTextCream, s1, e1, strokeWidth = strokeMain, cap = StrokeCap.Round)
                     }
                     if (p2 > 0f) {
                         val s2 = Offset(size.width, 0f)
                         val e2 = Offset(size.width * (1f - p2), size.height * p2)
-                        drawLine(Color(0x451A484C), s2 + Offset(0f, shadowOffset), e2 + Offset(0f, shadowOffset), strokeWidth = strokeShadow, cap = StrokeCap.Round)
+                        drawLine(Color(0x452B190E), s2 + Offset(0f, shadowOffset), e2 + Offset(0f, shadowOffset), strokeWidth = strokeShadow, cap = StrokeCap.Round)
                         drawLine(ClayTextCream, s2, e2, strokeWidth = strokeMain, cap = StrokeCap.Round)
                     }
                 } else if (mark == "O") {
@@ -964,7 +964,7 @@ private fun StudioClayXoxoCell(
                     val arcSize = Size(size.width - strokeMain, size.height - strokeMain)
                     val topLeft = Offset(inset, inset)
                     drawArc(
-                        color = Color(0x451A484C),
+                        color = Color(0x452B190E),
                         startAngle = -90f,
                         sweepAngle = sweep,
                         useCenter = false,

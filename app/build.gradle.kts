@@ -17,8 +17,8 @@ android {
     applicationId = "com.aistudio.kinnest.mzafam"
     minSdk = 24
     targetSdk = 36
-    versionCode = 9
-    versionName = "9.0"
+    versionCode = 10
+    versionName = "10.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -113,7 +113,10 @@ dependencies {
   implementation(libs.androidx.core.telecom)
   implementation(libs.androidx.glance.appwidget)
   implementation(libs.androidx.glance.material3)
-  implementation(libs.livekit.android)
+  implementation(libs.stream.webrtc.android)
+  implementation(libs.socket.io.client) {
+    exclude(group = "org.json", module = "json")
+  }
   implementation(libs.supabase.postgrest)
   implementation(libs.supabase.realtime)
   implementation(libs.supabase.storage)

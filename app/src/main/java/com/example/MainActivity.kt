@@ -4,6 +4,15 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -130,7 +139,7 @@ private fun KinNestAppRoot(
     val isWalkieRecording by viewModel.isWalkieRecording.collectAsStateWithLifecycle()
     val memberPresence by viewModel.memberPresence.collectAsStateWithLifecycle()
     val xoxoState by viewModel.xoxoState.collectAsStateWithLifecycle()
-    val liveKitRoom by viewModel.liveKitRoom.collectAsStateWithLifecycle()
+    val webRtcEglBaseContext = remember { viewModel.webRtcEglBaseContext }
     val isLiveStreamActive by viewModel.isLiveStreamActive.collectAsStateWithLifecycle()
     val videoTracksByMember by viewModel.videoTracksByMember.collectAsStateWithLifecycle()
     val connectedLiveMembers by viewModel.connectedLiveMembers.collectAsStateWithLifecycle()
@@ -222,9 +231,53 @@ private fun KinNestAppRoot(
                         KinNestRoute.LoginPortal
                     }
                 }
+                val iosEase = remember { CubicBezierEasing(0.22f, 1f, 0.36f, 1f) }
                 NavHost(
                     navController = navController,
-                    startDestination = initialStartDestination
+                    startDestination = initialStartDestination,
+                    enterTransition = {
+                        if (a11yConfig.reducedMotion) {
+                            fadeIn(tween(120))
+                        } else {
+                            slideInHorizontally(
+                                initialOffsetX = { (it * 0.14f).toInt() },
+                                animationSpec = tween(300, easing = iosEase)
+                            ) + fadeIn(tween(240, easing = iosEase)) + scaleIn(
+                                initialScale = 0.985f,
+                                animationSpec = tween(300, easing = iosEase)
+                            )
+                        }
+                    },
+                    exitTransition = {
+                        if (a11yConfig.reducedMotion) {
+                            fadeOut(tween(100))
+                        } else {
+                            slideOutHorizontally(
+                                targetOffsetX = { -(it * 0.08f).toInt() },
+                                animationSpec = tween(260, easing = iosEase)
+                            ) + fadeOut(tween(180, easing = iosEase))
+                        }
+                    },
+                    popEnterTransition = {
+                        if (a11yConfig.reducedMotion) {
+                            fadeIn(tween(120))
+                        } else {
+                            slideInHorizontally(
+                                initialOffsetX = { -(it * 0.10f).toInt() },
+                                animationSpec = tween(280, easing = iosEase)
+                            ) + fadeIn(tween(220, easing = iosEase))
+                        }
+                    },
+                    popExitTransition = {
+                        if (a11yConfig.reducedMotion) {
+                            fadeOut(tween(100))
+                        } else {
+                            slideOutHorizontally(
+                                targetOffsetX = { (it * 0.14f).toInt() },
+                                animationSpec = tween(260, easing = iosEase)
+                            ) + fadeOut(tween(180, easing = iosEase))
+                        }
+                    }
                 ) {
                     composable<KinNestRoute.LoginPortal> {
                         AvatarLoginScreen(
@@ -256,22 +309,6 @@ private fun KinNestAppRoot(
 
                         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                             val isWideScreen = maxWidth >= 840.dp
-
-                            if (selectedTab == WorkspaceTab.CHAT) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(
-                                            androidx.compose.ui.graphics.Brush.verticalGradient(
-                                                colorStops = arrayOf(
-                                                    0.0f to androidx.compose.ui.graphics.Color(0xFF5D96F5),
-                                                    0.45f to androidx.compose.ui.graphics.Color(0xFF3E78E8),
-                                                    1.0f to androidx.compose.ui.graphics.Color(0xFF2356C8)
-                                                )
-                                            )
-                                        )
-                                )
-                            }
 
                             Row(modifier = Modifier.fillMaxSize()) {
                                 if (isWideScreen) {
@@ -313,106 +350,133 @@ private fun KinNestAppRoot(
                                         )
 
                                         Box(modifier = Modifier.weight(1f).fillMaxSize()) {
-                                            when (selectedTab) {
-                                                WorkspaceTab.HOME -> {
-                                                    HomeTreehouseScreen(
-                                                        session = session,
-                                                        profiles = profiles,
-                                                        memberPresence = memberPresence,
-                                                        isWalkieRecording = isWalkieRecording,
-                                                        onSelectPresenceStatus = viewModel::setMyPresenceAvailability,
-                                                        onWalkiePressStart = viewModel::startWalkieTalkieHold,
-                                                        onWalkiePressRelease = viewModel::releaseWalkieTalkieHold,
-                                                        onOpenSettings = {
-                                                            viewModel.recordUserInteraction()
-                                                            navController.navigate(KinNestRoute.ParentalSettings)
-                                                        }
-                                                    )
-                                                }
+                                            AnimatedContent(
+                                                targetState = selectedTab,
+                                                transitionSpec = {
+                                                    if (a11yConfig.reducedMotion) {
+                                                        fadeIn(tween(120)) togetherWith fadeOut(tween(100))
+                                                    } else {
+                                                        val goingForward = targetState.index >= initialState.index
+                                                        val slideIn = slideInHorizontally(
+                                                            initialOffsetX = { full ->
+                                                                val dist = (full * 0.08f).toInt()
+                                                                if (goingForward) dist else -dist
+                                                            },
+                                                            animationSpec = tween(240, easing = iosEase)
+                                                        ) + fadeIn(tween(220, easing = iosEase))
+                                                        val slideOut = slideOutHorizontally(
+                                                            targetOffsetX = { full ->
+                                                                val dist = (full * 0.06f).toInt()
+                                                                if (goingForward) -dist else dist
+                                                            },
+                                                            animationSpec = tween(200, easing = iosEase)
+                                                        ) + fadeOut(tween(160, easing = iosEase))
+                                                        slideIn togetherWith slideOut
+                                                    }
+                                                },
+                                                label = "ios_workspace_tab_switch"
+                                            ) { activeTab ->
+                                                when (activeTab) {
+                                                    WorkspaceTab.HOME -> {
+                                                        HomeTreehouseScreen(
+                                                            session = session,
+                                                            profiles = profiles,
+                                                            memberPresence = memberPresence,
+                                                            isWalkieRecording = isWalkieRecording,
+                                                            onSelectPresenceStatus = viewModel::setMyPresenceAvailability,
+                                                            onWalkiePressStart = viewModel::startWalkieTalkieHold,
+                                                            onWalkiePressRelease = viewModel::releaseWalkieTalkieHold,
+                                                            onOpenSettings = {
+                                                                viewModel.recordUserInteraction()
+                                                                navController.navigate(KinNestRoute.ParentalSettings)
+                                                            }
+                                                        )
+                                                    }
 
-                                                WorkspaceTab.CALL -> {
-                                                    CallLauncherScreen(
-                                                        session = session,
-                                                        callState = callState,
-                                                        profiles = profiles,
-                                                        memberPresence = memberPresence,
-                                                        onCycleMyPresenceStatus = viewModel::cycleMyPresenceAvailability,
-                                                        onStartGroupVideoCall = {
-                                                            viewModel.startFamilyCall(
-                                                                targets = listOf(
-                                                                    FamilyMemberId.MITHUN,
-                                                                    FamilyMemberId.MAFITHA,
-                                                                    FamilyMemberId.ZAYN
-                                                                ),
-                                                                videoEnabled = true
-                                                            )
-                                                        },
-                                                        onStartIndividualVideoCall = { target ->
-                                                            viewModel.startFamilyCall(
-                                                                targets = listOf(target),
-                                                                videoEnabled = true
-                                                            )
-                                                        },
-                                                        onStartGroupVoiceCall = {
-                                                            viewModel.startFamilyCall(
-                                                                targets = listOf(
-                                                                    FamilyMemberId.MITHUN,
-                                                                    FamilyMemberId.MAFITHA,
-                                                                    FamilyMemberId.ZAYN
-                                                                ),
-                                                                videoEnabled = false
-                                                            )
-                                                        },
-                                                        onStartIndividualVoiceCall = { target ->
-                                                            viewModel.startFamilyCall(
-                                                                targets = listOf(target),
-                                                                videoEnabled = false
-                                                            )
-                                                        },
-                                                        onCycleAudioRoute = viewModel::cycleAudioRoute
-                                                    )
-                                                }
+                                                    WorkspaceTab.CALL -> {
+                                                        CallLauncherScreen(
+                                                            session = session,
+                                                            callState = callState,
+                                                            profiles = profiles,
+                                                            memberPresence = memberPresence,
+                                                            onCycleMyPresenceStatus = viewModel::cycleMyPresenceAvailability,
+                                                            onStartGroupVideoCall = {
+                                                                viewModel.startFamilyCall(
+                                                                    targets = listOf(
+                                                                        FamilyMemberId.MITHUN,
+                                                                        FamilyMemberId.MAFITHA,
+                                                                        FamilyMemberId.ZAYN
+                                                                    ),
+                                                                    videoEnabled = true
+                                                                )
+                                                            },
+                                                            onStartIndividualVideoCall = { target ->
+                                                                viewModel.startFamilyCall(
+                                                                    targets = listOf(target),
+                                                                    videoEnabled = true
+                                                                )
+                                                            },
+                                                            onStartGroupVoiceCall = {
+                                                                viewModel.startFamilyCall(
+                                                                    targets = listOf(
+                                                                        FamilyMemberId.MITHUN,
+                                                                        FamilyMemberId.MAFITHA,
+                                                                        FamilyMemberId.ZAYN
+                                                                    ),
+                                                                    videoEnabled = false
+                                                                )
+                                                            },
+                                                            onStartIndividualVoiceCall = { target ->
+                                                                viewModel.startFamilyCall(
+                                                                    targets = listOf(target),
+                                                                    videoEnabled = false
+                                                                )
+                                                            },
+                                                            onCycleAudioRoute = viewModel::cycleAudioRoute
+                                                        )
+                                                    }
 
-                                                WorkspaceTab.CHAT -> {
-                                                    ChatBubbleScreen(
-                                                        session = session,
-                                                        profiles = profiles,
-                                                        allMessages = allMessages,
-                                                        onSelectThread = viewModel::selectChatThread,
-                                                        onSendText = { text ->
-                                                            viewModel.sendMessage(
-                                                                threadId = session.selectedThreadId,
-                                                                plaintext = text,
-                                                                type = MessageType.TEXT
-                                                            )
-                                                        },
-                                                        onSendMediaUri = { uri, type ->
-                                                            viewModel.sendMessage(
-                                                                threadId = session.selectedThreadId,
-                                                                plaintext = if (type == MessageType.PHOTO) "Shared a family photo 📸" else "Shared a video clip 🎬",
-                                                                type = type,
-                                                                mediaLocalPath = uri
-                                                            )
-                                                        },
-                                                        onPlayVoiceClip = viewModel::playVoiceMessage,
-                                                        onReactMessage = viewModel::reactToMessage,
-                                                        onRetrySync = { viewModel.triggerSyncNow(expedited = true) }
-                                                    )
-                                                }
+                                                    WorkspaceTab.CHAT -> {
+                                                        ChatBubbleScreen(
+                                                            session = session,
+                                                            profiles = profiles,
+                                                            allMessages = allMessages,
+                                                            onSelectThread = viewModel::selectChatThread,
+                                                            onSendText = { text ->
+                                                                viewModel.sendMessage(
+                                                                    threadId = session.selectedThreadId,
+                                                                    plaintext = text,
+                                                                    type = MessageType.TEXT
+                                                                )
+                                                            },
+                                                            onSendMediaUri = { uri, type ->
+                                                                viewModel.sendMessage(
+                                                                    threadId = session.selectedThreadId,
+                                                                    plaintext = if (type == MessageType.PHOTO) "Shared a family photo 📸" else "Shared a video clip 🎬",
+                                                                    type = type,
+                                                                    mediaLocalPath = uri
+                                                                )
+                                                            },
+                                                            onPlayVoiceClip = viewModel::playVoiceMessage,
+                                                            onReactMessage = viewModel::reactToMessage,
+                                                            onRetrySync = { viewModel.triggerSyncNow(expedited = true) }
+                                                        )
+                                                    }
 
-                                                WorkspaceTab.PLAY -> {
-                                                    PlayChestScreen(
-                                                        xoxoState = xoxoState,
-                                                        selfMember = session.deviceOwner ?: session.activeMember ?: FamilyMemberId.MITHUN,
-                                                        profiles = profiles,
-                                                        memberPresence = memberPresence,
-                                                        onSelectPlayers = viewModel::selectXoxoPlayers,
-                                                        onSwapSides = viewModel::swapXoxoSides,
-                                                        onChangePlayMode = viewModel::setXoxoPlayMode,
-                                                        onMakeMove = viewModel::makeXoxoMove,
-                                                        onNextRound = viewModel::startNextXoxoRound,
-                                                        onResetScores = viewModel::resetXoxoMatchScores
-                                                    )
+                                                    WorkspaceTab.PLAY -> {
+                                                        PlayChestScreen(
+                                                            xoxoState = xoxoState,
+                                                            selfMember = session.deviceOwner ?: session.activeMember ?: FamilyMemberId.MITHUN,
+                                                            profiles = profiles,
+                                                            memberPresence = memberPresence,
+                                                            onSelectPlayers = viewModel::selectXoxoPlayers,
+                                                            onSwapSides = viewModel::swapXoxoSides,
+                                                            onChangePlayMode = viewModel::setXoxoPlayMode,
+                                                            onMakeMove = viewModel::makeXoxoMove,
+                                                            onNextRound = viewModel::startNextXoxoRound,
+                                                            onResetScores = viewModel::resetXoxoMatchScores
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -427,7 +491,7 @@ private fun KinNestAppRoot(
                             selfMember = session.activeMember ?: FamilyMemberId.MITHUN,
                             callState = callState,
                             profiles = profiles,
-                            liveKitRoom = liveKitRoom,
+                            eglBaseContext = webRtcEglBaseContext,
                             isLiveStreamActive = isLiveStreamActive,
                             videoTracksByMember = videoTracksByMember,
                             connectedLiveMembers = connectedLiveMembers,

@@ -1,0 +1,19 @@
+{
+  "name": "holymoly-webrtc-signaling",
+  "version": "1.0.0",
+  "description": "Node.js + Socket.io WebRTC signaling server for 3-way authorized family mesh calls",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  }
+}

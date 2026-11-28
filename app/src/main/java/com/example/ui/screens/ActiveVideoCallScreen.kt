@@ -2,7 +2,6 @@ package com.example.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.view.LayoutInflater
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -95,7 +94,7 @@ import com.example.data.model.CallState
 import com.example.data.model.FamilyMemberId
 import com.example.data.model.LiveStroke
 import com.example.data.model.haloColor
-import com.example.media.LiveKitTokenProvider
+import com.example.media.WebRtcTextureVideoView
 import com.example.ui.components.EmojiPhysicsBurstOverlay
 import com.example.ui.components.FamilyMemberAvatar
 import com.example.ui.theme.CrimsonDecline
@@ -106,17 +105,15 @@ import com.example.ui.theme.MintTreehouse
 import com.example.ui.theme.PurpleChest
 import com.example.ui.theme.WalkieAmber
 import com.example.ui.theme.liquidGlass
-import io.livekit.android.renderer.SurfaceViewRenderer
-import io.livekit.android.room.Room
-import io.livekit.android.room.track.VideoTrack
-import livekit.org.webrtc.RendererCommon
+import org.webrtc.EglBase
+import org.webrtc.VideoTrack
 
 @Composable
 fun ActiveVideoCallScreen(
     selfMember: FamilyMemberId,
     callState: CallState,
     profiles: List<UserProfileEntity>,
-    liveKitRoom: Room?,
+    eglBaseContext: EglBase.Context,
     isLiveStreamActive: Boolean,
     videoTracksByMember: Map<FamilyMemberId, VideoTrack>,
     connectedLiveMembers: Set<FamilyMemberId>,
@@ -218,11 +215,11 @@ fun ActiveVideoCallScreen(
 
     val stageBgBrush = if (isVoiceStage) {
         Brush.verticalGradient(
-            listOf(Color(0xFF0E2936), Color(0xFF13394A), Color(0xFF0A1D28))
+            listOf(Color(0xFF281B12), Color(0xFF3A271B), Color(0xFF1D130C))
         )
     } else {
         Brush.verticalGradient(
-            listOf(Color(0xFF070B16), Color(0xFF070B16))
+            listOf(Color(0xFF18100A), Color(0xFF18100A))
         )
     }
 
@@ -350,9 +347,6 @@ fun ActiveVideoCallScreen(
                         .fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    val allowOfflineCameraPreview = remember {
-                        !LiveKitTokenProvider.isLiveKitUrlConfigured()
-                    }
                     val primary = participants.first()
                     val primaryProfile = profiles.firstOrNull { it.memberId == primary.memberId.name }
                     key(primary.memberId) {
@@ -360,12 +354,10 @@ fun ActiveVideoCallScreen(
                             participant = primary,
                             profile = primaryProfile,
                             isLocalSelf = primary.memberId == selfMember,
-                            liveKitRoom = liveKitRoom,
+                            eglBaseContext = eglBaseContext,
                             liveVideoTrack = videoTracksByMember[primary.memberId],
                             isLiveStreamActive = isLiveStreamActive,
-                            allowOfflineCameraPreview = allowOfflineCameraPreview && callState.phase is CallPhase.Active,
                             isMemberJoinedLive = primary.memberId in connectedLiveMembers,
-                            hasCameraPerm = hasCameraPerm,
                             isCameraOn = if (primary.memberId == selfMember) callState.isLocalCameraOn else primary.isCameraEnabled,
                             isFrontCamera = callState.isFrontCamera,
                             tapPulseActive = callState.screenTapPulseMember == primary.memberId,
@@ -389,12 +381,10 @@ fun ActiveVideoCallScreen(
                                         participant = p,
                                         profile = prof,
                                         isLocalSelf = p.memberId == selfMember,
-                                        liveKitRoom = liveKitRoom,
+                                        eglBaseContext = eglBaseContext,
                                         liveVideoTrack = videoTracksByMember[p.memberId],
                                         isLiveStreamActive = isLiveStreamActive,
-                                        allowOfflineCameraPreview = allowOfflineCameraPreview && callState.phase is CallPhase.Active,
                                         isMemberJoinedLive = p.memberId in connectedLiveMembers,
-                                        hasCameraPerm = hasCameraPerm,
                                         isCameraOn = if (p.memberId == selfMember) callState.isLocalCameraOn else p.isCameraEnabled,
                                         isFrontCamera = callState.isFrontCamera,
                                         tapPulseActive = callState.screenTapPulseMember == p.memberId,
@@ -701,7 +691,7 @@ private fun LiveVoiceCallStage(
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
                                     .size(26.dp)
-                                    .border(2.dp, Color(0xFF0E2936), CircleShape)
+                                    .border(2.dp, Color(0xFF281B12), CircleShape)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
@@ -778,12 +768,10 @@ private fun VideoParticipantTile(
     participant: CallParticipantState,
     profile: UserProfileEntity?,
     isLocalSelf: Boolean,
-    liveKitRoom: Room?,
+    eglBaseContext: EglBase.Context,
     liveVideoTrack: VideoTrack?,
     isLiveStreamActive: Boolean,
-    allowOfflineCameraPreview: Boolean,
     isMemberJoinedLive: Boolean,
-    hasCameraPerm: Boolean,
     isCameraOn: Boolean,
     isFrontCamera: Boolean,
     tapPulseActive: Boolean,
@@ -797,25 +785,19 @@ private fun VideoParticipantTile(
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(26.dp))
-            .background(Color(0xFF111827))
+            .background(Color(0xFF221710))
             .border(
                 width = if (tapPulseActive) 5.dp else if (participant.isSpeaking) 3.5.dp else 1.5.dp,
                 color = if (tapPulseActive) WalkieAmber else if (participant.isSpeaking) halo else Color.White.copy(alpha = 0.2f),
                 shape = RoundedCornerShape(26.dp)
             )
     ) {
-        // Real LiveKit WebRTC video surface for both local & remote family members
-        if (liveKitRoom != null && liveVideoTrack != null && (if (isLocalSelf) isCameraOn else true)) {
-            LiveKitVideoRendererView(
-                room = liveKitRoom,
+        // Native WebRTC TextureView video surface for both local & remote 3-way mesh tracks
+        if (liveVideoTrack != null && (if (isLocalSelf) isCameraOn else true)) {
+            NativeWebRtcVideoView(
+                eglBaseContext = eglBaseContext,
                 videoTrack = liveVideoTrack,
                 mirror = isLocalSelf && isFrontCamera,
-                modifier = Modifier.fillMaxSize()
-            )
-        } else if (isLocalSelf && allowOfflineCameraPreview && liveKitRoom == null && !isLiveStreamActive && hasCameraPerm && isCameraOn) {
-            // Only fall back to CameraX in offline preview mode (never contend with LiveKit's camera/EGL)
-            CameraXLivePreview(
-                useFrontCamera = isFrontCamera,
                 modifier = Modifier.fillMaxSize()
             )
         } else {
@@ -1014,26 +996,17 @@ fun CameraXLivePreview(
 }
 
 @Composable
-private fun LiveKitVideoRendererView(
-    room: Room,
+private fun NativeWebRtcVideoView(
+    eglBaseContext: EglBase.Context,
     videoTrack: VideoTrack,
     mirror: Boolean,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val renderer = remember(room) {
-        val view = runCatching {
-            LayoutInflater.from(context)
-                .inflate(R.layout.view_livekit_renderer, null, false) as SurfaceViewRenderer
-        }.getOrElse {
-            SurfaceViewRenderer(context).apply { id = R.id.livekit_video_renderer }
+    val renderer = remember(eglBaseContext) {
+        WebRtcTextureVideoView(context).apply {
+            init(eglBaseContext)
         }
-        runCatching {
-            room.initVideoRenderer(view)
-            view.setEnableHardwareScaler(true)
-            view.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
-        }
-        view
     }
     var attachedTrack by remember(renderer) { mutableStateOf<VideoTrack?>(null) }
 
@@ -1041,14 +1014,13 @@ private fun LiveKitVideoRendererView(
         runCatching { renderer.setMirror(mirror) }
     }
 
-    // Registered SECOND after AndroidView/onRelease so videoTrack always detaches before EGL release
     DisposableEffect(videoTrack, renderer) {
         runCatching {
-            videoTrack.addRenderer(renderer)
+            videoTrack.addSink(renderer)
             attachedTrack = videoTrack
         }
         onDispose {
-            runCatching { videoTrack.removeRenderer(renderer) }
+            runCatching { videoTrack.removeSink(renderer) }
             if (attachedTrack == videoTrack) {
                 attachedTrack = null
             }
@@ -1058,7 +1030,7 @@ private fun LiveKitVideoRendererView(
     AndroidView(
         factory = { renderer },
         onRelease = { view ->
-            runCatching { attachedTrack?.removeRenderer(view) }
+            runCatching { attachedTrack?.removeSink(view) }
             attachedTrack = null
             runCatching { view.release() }
         },

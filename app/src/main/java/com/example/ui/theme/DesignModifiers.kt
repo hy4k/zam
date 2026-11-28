@@ -3,7 +3,6 @@ package com.example.ui.theme
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.getValue
@@ -25,7 +24,11 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -38,27 +41,26 @@ fun Modifier.liquidGlassBlurLayer(
 ): Modifier = this
 
 /**
- * Smooth Frosted Clay-Glass Surface (inspired by the frosted translucent glass bar at the bottom
- * of the attached studio clay image):
- * Clean translucent warm-cream glass with crisp top specular catchlight and soft studio shadow.
+ * Crisp iOS Frosted Glass Surface (for floating bottom dock, overlays, and sleek translucent cards):
+ * Bright luminous white glass frost, specular top edge rim, and airy soft drop shadow.
  */
 fun Modifier.liquidGlass(
-    shape: Shape = RoundedCornerShape(30.dp),
-    surfaceAlpha: Float = 0.80f,
+    shape: Shape = RoundedCornerShape(28.dp),
+    surfaceAlpha: Float = 0.92f,
     tintColor: Color = ClayVanillaLight,
     applyBlur: Boolean = false,
     reducedMotion: Boolean = false,
-    cornerRadius: Dp = 30.dp
+    cornerRadius: Dp = 28.dp
 ): Modifier {
-    val topFrost = lerp(tintColor, Color.White, 0.35f).copy(alpha = (surfaceAlpha + 0.10f).coerceAtMost(0.94f))
-    val bottomFrost = tintColor.copy(alpha = (surfaceAlpha - 0.06f).coerceAtLeast(0.68f))
+    val topFrost = lerp(tintColor, Color.White, 0.45f).copy(alpha = (surfaceAlpha + 0.05f).coerceAtMost(0.97f))
+    val bottomFrost = tintColor.copy(alpha = (surfaceAlpha - 0.04f).coerceAtLeast(0.80f))
     return this
         .shadow(
             elevation = 16.dp,
             shape = shape,
             clip = false,
-            ambientColor = ClayTealShadow.copy(alpha = 0.34f),
-            spotColor = ClayTealShadow.copy(alpha = 0.38f)
+            ambientColor = ClayTealShadow.copy(alpha = 0.16f),
+            spotColor = ClayTealShadow.copy(alpha = 0.20f)
         )
         .clip(shape)
         .then(if (applyBlur) Modifier.liquidGlassBlurLayer(25f, reducedMotion) else Modifier)
@@ -69,14 +71,14 @@ fun Modifier.liquidGlass(
         )
         .drawBehind {
             if (size.width <= 0f || size.height <= 0f) return@drawBehind
-            val strokePx = 1.6.dp.toPx()
+            val strokePx = 1.35.dp.toPx()
             val cornerPx = cornerRadius.toPx().coerceAtMost(minOf(size.width, size.height) / 2f)
             drawRoundRect(
                 brush = Brush.linearGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.92f),
-                        Color.White.copy(alpha = 0.42f),
-                        ClayTealShadow.copy(alpha = 0.16f)
+                        Color.White.copy(alpha = 0.95f),
+                        Color.White.copy(alpha = 0.55f),
+                        ClayVanillaDeep.copy(alpha = 0.40f)
                     )
                 ),
                 cornerRadius = CornerRadius(cornerPx, cornerPx),
@@ -86,35 +88,37 @@ fun Modifier.liquidGlass(
 }
 
 /**
- * SIGNATURE PIXAR 3D MATTE CLAYMORPHISM (100% Pure Compose GPU brushes, zero saveLayer / BlurMaskFilter):
- * Directly captures the smooth, velvety, physically-thick molded clay discs & objects in the attached image:
- *  - Soft, wide directional studio drop shadow onto the mint-teal wall
- *  - Physical 3D molded bottom bevel lip (`ledgeDepth`) so every button/card feels sculpted out of real clay
- *  - Smooth matte sunlit top-left to warm-curved bottom-right clay dome gradient
- *  - Pillowy soft white top-left inner catchlight + subtle curved bottom-right inner clay rim
+ * VIBRANT 3D CLAY TOY-BLOCK MORPHISM (100% Pure Compose GPU brushes):
+ * Matches the plush, saturated 3D rounded tiles in the attached reference images:
+ *  - Colored ambient glow shadow tinted naturally by `surfaceColor`
+ *  - Pure, rich 3D extruded bottom bevel lip (never muddied with brown!)
+ *  - Silky sunlit vertical gradient face with crisp glossy white specular top rim
  */
 fun Modifier.claymorphic(
-    cornerRadius: Dp = 30.dp,
+    cornerRadius: Dp = 26.dp,
     surfaceColor: Color = ClayPeach,
-    elevation: Dp = 14.dp,
-    innerShadowAlpha: Float = 0.18f,
-    innerOffset: Dp = 4.5.dp,
+    elevation: Dp = 12.dp,
+    innerShadowAlpha: Float = 0.14f,
+    innerOffset: Dp = 2.dp,
     shadowTint: Color = ClayTealShadow,
-    ledgeDepth: Dp = 5.dp
+    ledgeDepth: Dp = 4.dp
 ): Modifier {
     val shape = RoundedCornerShape(cornerRadius)
-    val topLit = lerp(surfaceColor, Color.White, 0.28f)
+    val isBrightLight = surfaceColor.luminance() > 0.72f
+    val refinedLedge = (ledgeDepth * 0.85f).coerceIn(2.dp, 6.dp)
+    val topLit = lerp(surfaceColor, Color.White, if (isBrightLight) 0.35f else 0.24f)
     val midMatte = surfaceColor
-    val bottomCurve = lerp(surfaceColor, shadowTint, 0.10f)
-    val deepBevel = lerp(surfaceColor, Color(0xFF4A2A1E), 0.24f)
+    val bottomCurve = lerp(surfaceColor, Color(0xFF0E203C), if (isBrightLight) 0.05f else 0.08f)
+    val deepBevel = lerp(surfaceColor, Color(0xFF0B1C36), if (isBrightLight) 0.12f else 0.26f)
+    val glowShadow = if (isBrightLight) shadowTint else lerp(surfaceColor, shadowTint, 0.35f)
 
     return this
         .shadow(
-            elevation = elevation,
+            elevation = (elevation * 0.9f).coerceAtLeast(4.dp),
             shape = shape,
             clip = false,
-            ambientColor = shadowTint.copy(alpha = 0.42f),
-            spotColor = shadowTint.copy(alpha = 0.46f)
+            ambientColor = glowShadow.copy(alpha = if (isBrightLight) 0.18f else 0.34f),
+            spotColor = glowShadow.copy(alpha = if (isBrightLight) 0.22f else 0.38f)
         )
         .clip(shape)
         .background(deepBevel)
@@ -122,9 +126,8 @@ fun Modifier.claymorphic(
             if (size.width <= 2f || size.height <= 2f) return@drawBehind
             val maxR = minOf(size.width, size.height) / 2f
             val cr = cornerRadius.toPx().coerceAtMost(maxR)
-            val lipPx = ledgeDepth.toPx().coerceAtMost(size.height * 0.18f)
+            val lipPx = refinedLedge.toPx().coerceAtMost(size.height * 0.14f)
 
-            // Main sculpted matte clay body floating cleanly above its 3D base thickness
             drawRoundRect(
                 brush = Brush.verticalGradient(
                     colors = listOf(topLit, midMatte, bottomCurve)
@@ -140,136 +143,108 @@ fun Modifier.claymorphic(
 
             val maxR = (minOf(size.width, size.height) / 2f).coerceAtLeast(1f)
             val cr = cornerRadius.toPx().coerceAtMost(maxR)
-            val lipPx = ledgeDepth.toPx().coerceAtMost(size.height * 0.18f)
+            val lipPx = refinedLedge.toPx().coerceAtMost(size.height * 0.14f)
             val insetStroke = innerOffset.toPx().coerceIn(1f, maxR)
             val bodyH = (size.height - lipPx).coerceAtLeast(1f)
 
-            // Pillowy sunlit top-left inner clay rim
+            // Crisp glossy white specular catchlight along upper rim (3D clay polish)
             drawRoundRect(
                 brush = Brush.linearGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.78f),
-                        Color.White.copy(alpha = 0.22f),
+                        Color.White.copy(alpha = if (isBrightLight) 0.90f else 0.65f),
+                        Color.White.copy(alpha = 0.20f),
                         Color.Transparent,
-                        Color.Transparent
-                    ),
-                    start = Offset(0f, 0f),
-                    end = Offset(size.width * 0.85f, bodyH * 0.85f)
-                ),
-                topLeft = Offset(insetStroke * 0.4f, insetStroke * 0.4f),
-                size = Size(
-                    (size.width - insetStroke * 0.8f).coerceAtLeast(1f),
-                    (bodyH - insetStroke * 0.8f).coerceAtLeast(1f)
-                ),
-                cornerRadius = CornerRadius(
-                    (cr - insetStroke * 0.4f).coerceAtLeast(0f),
-                    (cr - insetStroke * 0.4f).coerceAtLeast(0f)
-                ),
-                style = Stroke(width = insetStroke * 0.85f)
-            )
-
-            // Soft bottom-right curved inner shading
-            drawRoundRect(
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color.Transparent,
-                        Color.Transparent,
-                        deepBevel.copy(alpha = innerShadowAlpha * 0.75f),
-                        deepBevel.copy(alpha = innerShadowAlpha * 1.25f)
+                        deepBevel.copy(alpha = innerShadowAlpha)
                     ),
                     start = Offset(0f, 0f),
                     end = Offset(size.width, bodyH)
                 ),
-                topLeft = Offset(insetStroke * 0.45f, insetStroke * 0.45f),
+                topLeft = Offset(insetStroke * 0.35f, insetStroke * 0.35f),
                 size = Size(
-                    (size.width - insetStroke * 0.9f).coerceAtLeast(1f),
-                    (bodyH - insetStroke * 0.9f).coerceAtLeast(1f)
+                    (size.width - insetStroke * 0.7f).coerceAtLeast(1f),
+                    (bodyH - insetStroke * 0.7f).coerceAtLeast(1f)
                 ),
                 cornerRadius = CornerRadius(
-                    (cr - insetStroke * 0.45f).coerceAtLeast(0f),
-                    (cr - insetStroke * 0.45f).coerceAtLeast(0f)
+                    (cr - insetStroke * 0.35f).coerceAtLeast(0f),
+                    (cr - insetStroke * 0.35f).coerceAtLeast(0f)
                 ),
-                style = Stroke(width = insetStroke * 0.85f)
+                style = Stroke(width = 1.4.dp.toPx())
             )
         }
 }
 
 /**
- * Smooth 3D Molded Circular Matte Clay Disc (exact match for the 6 floating Peach-Cream
- * circular clay discs and floating round buttons in the attached image).
+ * Plump 3D Candy Clay Circular Medallion (for icon buttons & floating dock medallions).
  */
 fun Modifier.clayDisc3D(
     surfaceColor: Color = ClayPeach,
-    elevation: Dp = 14.dp,
+    elevation: Dp = 10.dp,
     shadowTint: Color = ClayTealShadow,
-    ledgeDepth: Dp = 4.5.dp
+    ledgeDepth: Dp = 3.5.dp
 ): Modifier {
-    val topLit = lerp(surfaceColor, Color.White, 0.30f)
-    val bottomCurve = lerp(surfaceColor, Color(0xFF4F2B1D), 0.14f)
-    val deepBevel = lerp(surfaceColor, Color(0xFF3E2218), 0.28f)
+    val isBrightLight = surfaceColor.luminance() > 0.72f
+    val refinedLedge = (ledgeDepth * 0.85f).coerceIn(2.dp, 4.5.dp)
+    val topLit = lerp(surfaceColor, Color.White, if (isBrightLight) 0.36f else 0.28f)
+    val bottomCurve = lerp(surfaceColor, Color(0xFF0D203C), if (isBrightLight) 0.06f else 0.10f)
+    val deepBevel = lerp(surfaceColor, Color(0xFF0A1A33), if (isBrightLight) 0.14f else 0.28f)
+    val glowShadow = if (isBrightLight) shadowTint else lerp(surfaceColor, shadowTint, 0.30f)
 
     return this
         .shadow(
-            elevation = elevation,
+            elevation = (elevation * 0.9f).coerceAtLeast(4.dp),
             shape = CircleShape,
             clip = false,
-            ambientColor = shadowTint.copy(alpha = 0.44f),
-            spotColor = shadowTint.copy(alpha = 0.50f)
+            ambientColor = glowShadow.copy(alpha = if (isBrightLight) 0.20f else 0.36f),
+            spotColor = glowShadow.copy(alpha = if (isBrightLight) 0.24f else 0.42f)
         )
         .clip(CircleShape)
         .background(deepBevel)
         .drawBehind {
             if (size.width <= 2f || size.height <= 2f) return@drawBehind
             val r = minOf(size.width, size.height) / 2f
-            val lipPx = ledgeDepth.toPx().coerceAtMost(r * 0.20f)
-            val topCenter = Offset(size.width / 2f, size.height / 2f - lipPx * 0.48f)
-            val faceRadius = (r - lipPx * 0.35f).coerceAtLeast(1f)
+            val lipPx = refinedLedge.toPx().coerceAtMost(r * 0.18f)
+            val topCenter = Offset(size.width / 2f, size.height / 2f - lipPx * 0.42f)
+            val faceRadius = (r - lipPx * 0.24f).coerceAtLeast(1f)
 
-            // Smooth matte sculpted clay disc face
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(topLit, surfaceColor, bottomCurve),
-                    center = Offset(size.width * 0.34f, size.height * 0.28f),
+                    center = Offset(size.width * 0.34f, size.height * 0.26f),
                     radius = faceRadius * 1.45f
                 ),
                 radius = faceRadius,
                 center = topCenter
             )
 
-            // Soft sunlit top-left specular clay rim
             drawCircle(
                 brush = Brush.linearGradient(
                     colors = listOf(
                         Color.White.copy(alpha = 0.82f),
                         Color.White.copy(alpha = 0.18f),
-                        Color.Transparent
+                        deepBevel.copy(alpha = 0.22f)
                     ),
                     start = Offset(0f, 0f),
-                    end = Offset(size.width * 0.78f, size.height * 0.78f)
+                    end = Offset(size.width * 0.85f, size.height * 0.85f)
                 ),
-                radius = (faceRadius - 1.5.dp.toPx()).coerceAtLeast(1f),
+                radius = (faceRadius - 1.dp.toPx()).coerceAtLeast(1f),
                 center = topCenter,
-                style = Stroke(width = 2.6.dp.toPx())
+                style = Stroke(width = 1.45.dp.toPx())
             )
         }
 }
 
-/**
- * Compatibility delegate: routes plushFuzzySurface calls cleanly to smooth Pixar Matte Claymorphism
- * so every button across all screens matches the attached image's sleek sculpted clay aesthetic!
- */
 fun Modifier.plushFuzzySurface(
     baseColor: Color,
     isCircle: Boolean = false,
-    cornerRadius: Dp = 26.dp,
-    furLength: Dp = 4.dp,
-    elevation: Dp = 12.dp
+    cornerRadius: Dp = 24.dp,
+    furLength: Dp = 3.dp,
+    elevation: Dp = 10.dp
 ): Modifier = if (isCircle) {
     clayDisc3D(
         surfaceColor = baseColor,
         elevation = elevation,
         shadowTint = ClayTealShadow,
-        ledgeDepth = 4.dp
+        ledgeDepth = 3.5.dp
     )
 } else {
     claymorphic(
@@ -277,20 +252,17 @@ fun Modifier.plushFuzzySurface(
         surfaceColor = baseColor,
         elevation = elevation,
         shadowTint = ClayTealShadow,
-        ledgeDepth = 4.5.dp
+        ledgeDepth = 4.dp
     )
 }
 
-/**
- * Compatibility delegate: routes vibrantBlock3D to our signature Matte 3D Claymorphism slab!
- */
 fun Modifier.vibrantBlock3D(
-    cornerRadius: Dp = 30.dp,
+    cornerRadius: Dp = 26.dp,
     topColor: Color = ClayPeachLight,
     bodyColor: Color = ClayPeach,
     deepLedgeColor: Color = ClayPeachDeep,
-    ledgeDepth: Dp = 6.dp,
-    elevation: Dp = 16.dp
+    ledgeDepth: Dp = 4.5.dp,
+    elevation: Dp = 12.dp
 ): Modifier = claymorphic(
     cornerRadius = cornerRadius,
     surfaceColor = bodyColor,
@@ -300,16 +272,16 @@ fun Modifier.vibrantBlock3D(
 )
 
 /**
- * Recessed / Debossed Clay Well (for speaker grilles, inputs, and push-to-talk sockets).
+ * Clean Recessed Pastel Well (for speaker grilles, inputs, and rotary dial sockets).
  */
 fun Modifier.pastelRecessedWell(
-    cornerRadius: Dp = 24.dp,
-    surfaceColor: Color = Color(0xFFF3CBB0),
+    cornerRadius: Dp = 20.dp,
+    surfaceColor: Color = Color(0xFFE6F2FA),
     shadowTint: Color = ClayTealShadow
 ): Modifier {
     val shape = RoundedCornerShape(cornerRadius)
-    val topWell = lerp(surfaceColor, shadowTint, 0.16f)
-    val bottomWell = lerp(surfaceColor, Color.White, 0.35f)
+    val topWell = lerp(surfaceColor, shadowTint, 0.14f)
+    val bottomWell = lerp(surfaceColor, Color.White, 0.36f)
 
     return this
         .clip(shape)
@@ -321,29 +293,32 @@ fun Modifier.pastelRecessedWell(
             drawRoundRect(
                 brush = Brush.linearGradient(
                     colors = listOf(
-                        shadowTint.copy(alpha = 0.28f),
+                        shadowTint.copy(alpha = 0.20f),
                         Color.Transparent,
                         Color.White.copy(alpha = 0.88f)
                     )
                 ),
                 cornerRadius = CornerRadius(radiusPx, radiusPx),
-                style = Stroke(width = 1.6.dp.toPx())
+                style = Stroke(width = 1.35.dp.toPx())
             )
         }
 }
 
 /**
- * Tactile spring bounce for kid-friendly 3D clay buttons; respects Reduced Motion accessibility.
+ * iPhone-Smooth Non-Consuming Spring Touch Scale + Subtle Haptic Feedback:
+ * Observes press/release on [PointerEventPass.Initial] without ever swallowing clicks or ripples,
+ * delivering instantaneous 120fps iOS tactile bounce across every button and card.
  */
 fun Modifier.clayPressScale(
     enabled: Boolean = true,
     reducedMotion: Boolean = false
 ): Modifier = composed {
+    val haptic = LocalHapticFeedback.current
     var pressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (pressed && enabled && !reducedMotion) 0.93f else 1f,
-        animationSpec = spring(dampingRatio = 0.54f, stiffness = 500f),
-        label = "clay_press_scale"
+        targetValue = if (pressed && enabled && !reducedMotion) 0.955f else 1f,
+        animationSpec = spring(dampingRatio = 0.62f, stiffness = 460f),
+        label = "ios_clay_press_scale"
     )
     this
         .graphicsLayer {
@@ -352,12 +327,17 @@ fun Modifier.clayPressScale(
         }
         .pointerInput(enabled) {
             if (!enabled) return@pointerInput
-            detectTapGestures(
-                onPress = {
-                    pressed = true
-                    tryAwaitRelease()
-                    pressed = false
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val anyDown = event.changes.any { it.pressed }
+                    if (anyDown && !pressed) {
+                        pressed = true
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    } else if (!anyDown && pressed) {
+                        pressed = false
+                    }
                 }
-            )
+            }
         }
 }

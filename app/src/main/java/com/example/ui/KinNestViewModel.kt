@@ -42,10 +42,10 @@ import com.example.data.model.VoiceLanguage
 import com.example.data.model.XoxoGameState
 import com.example.data.model.XoxoMark
 import com.example.data.model.XoxoPlayMode
-import com.example.media.LiveKitCallEngine
-import com.example.media.LiveKitDataPacket
 import com.example.media.StopRecordingResult
 import com.example.media.VoiceAndMediaCapture
+import com.example.media.WebRtcCallEngine
+import com.example.media.WebRtcDataPacket
 import com.example.security.DeviceKeystoreManager
 import com.example.security.ParentalAuthManager
 import com.example.sync.FamilyLoginResult
@@ -103,16 +103,16 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     private val keystore = DeviceKeystoreManager(appContext)
     private val syncRepo = KinNestSyncRepository(dao)
     val realtimeSignaling = SupabaseRealtimeSignaling()
-    val liveKitEngine = LiveKitCallEngine(appContext)
+    val webRtcEngine = WebRtcCallEngine(appContext, realtimeSignaling)
     val telecomManager = FamilyTelecomManager(appContext)
     val voiceCapture = VoiceAndMediaCapture(appContext)
     private val dailyComicRepo = DailyComicStylizerRepository(appContext)
     private val json = Json { ignoreUnknownKeys = true }
 
-    val liveKitRoom = liveKitEngine.activeRoom
-    val isLiveStreamActive = liveKitEngine.isLiveStreamActive
-    val videoTracksByMember = liveKitEngine.videoTracksByMember
-    val connectedLiveMembers = liveKitEngine.connectedLiveMembers
+    val webRtcEglBaseContext get() = webRtcEngine.eglBaseContext
+    val isLiveStreamActive = webRtcEngine.isLiveStreamActive
+    val videoTracksByMember = webRtcEngine.videoTracksByMember
+    val connectedLiveMembers = webRtcEngine.connectedLiveMembers
 
     private val devicePrefs = appContext.getSharedPreferences(PREFS_DEVICE_BINDING, Context.MODE_PRIVATE)
     private val initialDeviceOwner: FamilyMemberId? = devicePrefs
@@ -134,7 +134,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
 
     private val _callState = MutableStateFlow(
         CallState(
-            roomName = LiveKitCallEngine.DEFAULT_FAMILY_ROOM,
+            roomName = WebRtcCallEngine.DEFAULT_FAMILY_ROOM,
             recentCallLogs = listOf(
                 CallLogEntry("c1", "Mithun, Mafitha & Zayn", "3-Way Video", false, "Today • 8:05 AM", "14m 22s"),
                 CallLogEntry("c2", "Mafitha (Ummi)", "1-on-1 Video", false, "Yesterday • 6:40 PM", "06m 10s"),
@@ -179,7 +179,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
             isSyncingNow = syncing,
             lastSyncedLabel = lastLabel,
             supabaseConfigured = syncRepo.isSupabaseConfigured(),
-            liveKitConfigured = liveKitEngine.isLiveKitEndpointConfigured()
+            webRtcSignalingConfigured = webRtcEngine.isSignalingConfigured()
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), OfflineSyncState())
 
@@ -242,8 +242,8 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
             }
         }
         registerConnectivityMonitor()
-        observeLiveKitDataChannel()
-        observeLiveKitRoomState()
+        observeWebRtcDataChannel()
+        observeWebRtcRoomState()
         observeRealtimePresence()
         observeRealtimeSignaling()
         if (_isOnline.value) {
@@ -431,17 +431,37 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
 
     private fun registerConnectivityMonitor() {
         val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        var lastNetworkId: String? = null
+        var lastTransportKey: String? = null
+
+        fun transportSignature(caps: NetworkCapabilities): String = buildList {
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) add("WIFI")
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) add("CELLULAR")
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) add("ETHERNET")
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) add("VPN")
+        }.joinToString("+")
+
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                val netId = network.toString()
+                val switched = lastNetworkId != null && lastNetworkId != netId
+                lastNetworkId = netId
                 _isOnline.value = true
-                publishSelfPresenceNow(isHello = true)
                 if (isAppInForeground || isCallInProgress()) {
+                    val owner = _session.value.deviceOwner
                     val (avail, note) = computeEffectiveSelfPresence()
+                    if (owner != null) {
+                        updateSelfPresence(avail, note)
+                    }
                     realtimeSignaling.connectIfConfigured(
-                        member = _session.value.deviceOwner,
+                        member = owner,
                         availability = avail,
-                        statusNote = note
+                        statusNote = note,
+                        sendHello = true
                     )
+                }
+                if (isCallInProgress() && switched) {
+                    webRtcEngine.onNetworkChanged()
                 }
                 triggerSyncNow(expedited = false)
             }
@@ -449,18 +469,37 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
             override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
                 val hasInternet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 val currentlyOnline = hasInternet || checkCurrentConnectivity()
+                val currentTransport = transportSignature(networkCapabilities)
+                val transportChanged = lastTransportKey != null &&
+                    currentTransport.isNotBlank() &&
+                    lastTransportKey != currentTransport
+                if (currentTransport.isNotBlank()) {
+                    lastTransportKey = currentTransport
+                }
+
                 if (_isOnline.value != currentlyOnline) {
                     _isOnline.value = currentlyOnline
-                    publishSelfPresenceNow(isHello = currentlyOnline)
                     if (currentlyOnline && (isAppInForeground || isCallInProgress())) {
+                        val owner = _session.value.deviceOwner
                         val (avail, note) = computeEffectiveSelfPresence()
+                        if (owner != null) {
+                            updateSelfPresence(avail, note)
+                        }
                         realtimeSignaling.connectIfConfigured(
-                            member = _session.value.deviceOwner,
+                            member = owner,
                             availability = avail,
-                            statusNote = note
+                            statusNote = note,
+                            sendHello = true
                         )
+                        if (isCallInProgress()) {
+                            webRtcEngine.onNetworkChanged()
+                        }
                         triggerSyncNow(expedited = false)
+                    } else if (!currentlyOnline) {
+                        updateSelfPresence(PresenceAvailability.OFFLINE, null)
                     }
+                } else if (currentlyOnline && transportChanged && isCallInProgress()) {
+                    webRtcEngine.onNetworkChanged()
                 }
             }
 
@@ -471,6 +510,8 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                 if (!stillConnected) {
                     updateSelfPresence(PresenceAvailability.OFFLINE, null)
                     realtimeSignaling.disconnect()
+                } else if (isCallInProgress()) {
+                    webRtcEngine.onNetworkChanged()
                 }
             }
         }
@@ -487,16 +528,16 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun observeLiveKitDataChannel() {
+    private fun observeWebRtcDataChannel() {
         viewModelScope.launch {
-            liveKitEngine.incomingDataPackets.collect { packet ->
+            webRtcEngine.incomingDataPackets.collect { packet ->
                 when (packet) {
-                    is LiveKitDataPacket.EmojiBurstPacket -> {
+                    is WebRtcDataPacket.EmojiBurstPacket -> {
                         val sender = runCatching { FamilyMemberId.valueOf(packet.senderId) }
                             .getOrDefault(FamilyMemberId.ZAYN)
                         spawnEmojiBurst(packet.emoji, sender, broadcast = false)
                     }
-                    is LiveKitDataPacket.ArFilterPacket -> {
+                    is WebRtcDataPacket.ArFilterPacket -> {
                         val sender = runCatching { FamilyMemberId.valueOf(packet.senderId) }
                             .getOrNull() ?: return@collect
                         val filter = runCatching { ArFilterType.valueOf(packet.filterName) }
@@ -509,14 +550,14 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                             )
                         }
                     }
-                    is LiveKitDataPacket.ScreenTapPulsePacket -> {
+                    is WebRtcDataPacket.ScreenTapPulsePacket -> {
                         val sender = runCatching { FamilyMemberId.valueOf(packet.senderId) }
                             .getOrNull() ?: return@collect
                         _callState.update { it.copy(screenTapPulseMember = sender) }
                         delay(1100)
                         _callState.update { it.copy(screenTapPulseMember = null) }
                     }
-                    is LiveKitDataPacket.DrawingStrokePacket -> {
+                    is WebRtcDataPacket.DrawingStrokePacket -> {
                         val sender = runCatching { FamilyMemberId.valueOf(packet.senderId) }
                             .getOrDefault(FamilyMemberId.ZAYN)
                         _drawingStrokes.update { existing ->
@@ -534,14 +575,14 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun observeLiveKitRoomState() {
+    private fun observeWebRtcRoomState() {
         viewModelScope.launch {
-            liveKitEngine.connectionStatusLabel.collect { statusLabel ->
+            webRtcEngine.connectionStatusLabel.collect { statusLabel ->
                 _callState.update { it.copy(networkQualityLabel = statusLabel) }
             }
         }
         viewModelScope.launch {
-            liveKitEngine.isReconnecting.collect { reconnecting ->
+            webRtcEngine.isReconnecting.collect { reconnecting ->
                 _callState.update { state ->
                     when {
                         reconnecting && state.phase is CallPhase.Active ->
@@ -555,13 +596,13 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         }
         viewModelScope.launch {
             combine(
-                liveKitEngine.connectedLiveMembers,
-                liveKitEngine.speakingMembers,
-                liveKitEngine.videoTracksByMember,
-                liveKitEngine.mutedMembers,
-                liveKitEngine.isLiveStreamActive
+                webRtcEngine.connectedLiveMembers,
+                webRtcEngine.speakingMembers,
+                webRtcEngine.videoTracksByMember,
+                webRtcEngine.mutedMembers,
+                webRtcEngine.isLiveStreamActive
             ) { connected, speaking, tracks, muted, liveActive ->
-                LiveKitRoomSnapshot(connected, speaking, tracks, muted, liveActive)
+                WebRtcRoomSnapshot(connected, speaking, tracks, muted, liveActive)
             }.collect { snap ->
                 if (!snap.liveActive) return@collect
                 val self = _session.value.activeMember ?: FamilyMemberId.MITHUN
@@ -612,6 +653,26 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                     }
                     state.copy(participants = ordered)
                 }
+            }
+        }
+        viewModelScope.launch {
+            webRtcEngine.peerDroppedEvents.collect { droppedMember ->
+                val self = _session.value.activeMember ?: FamilyMemberId.MITHUN
+                if (droppedMember == self) return@collect
+                _callState.update { state ->
+                    if (state.phase !is CallPhase.Active && state.phase !is CallPhase.Reconnecting) {
+                        return@update state
+                    }
+                    val remaining = state.participants.filterNot { it.memberId == droppedMember }
+                    state.copy(participants = remaining)
+                }
+                _uiFeedback.tryEmit("${droppedMember.displayName} left the call")
+            }
+        }
+        viewModelScope.launch {
+            webRtcEngine.roomFullEvents.collect { message ->
+                _uiFeedback.tryEmit(message)
+                endCallInternal(reason = message, notifyRemote = false)
             }
         }
     }
@@ -681,11 +742,10 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                     SupabaseRealtimeSignaling.KIND_PRESENCE_PING -> {
                         if (signal.text == "HELLO" && self != null && (isAppInForeground || isCallInProgress()) && _isOnline.value) {
                             val (avail, note) = computeEffectiveSelfPresence()
-                            realtimeSignaling.trackPresence(
+                            realtimeSignaling.broadcastPresenceReplyOnly(
                                 member = self,
                                 availability = avail,
-                                statusNote = note,
-                                isHello = false
+                                statusNote = note
                             )
                         }
                     }
@@ -709,13 +769,13 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                             )
                             _callState.update {
                                 it.copy(
-                                    roomName = signal.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM },
+                                    roomName = signal.roomName.ifBlank { WebRtcCallEngine.DEFAULT_FAMILY_ROOM },
                                     isVoiceCallMode = !signal.videoEnabled,
                                     isLocalCameraOn = signal.videoEnabled,
                                     phase = CallPhase.RingingIncoming(
                                         caller = sender,
                                         isThreeWay = signal.isThreeWay,
-                                        roomName = signal.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM },
+                                        roomName = signal.roomName.ifBlank { WebRtcCallEngine.DEFAULT_FAMILY_ROOM },
                                         videoEnabled = signal.videoEnabled
                                     )
                                 )
@@ -727,7 +787,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                         val sameRoom = signal.roomName.isBlank() || signal.roomName == _callState.value.roomName
                         if (sameRoom && (currentPhase is CallPhase.DialingOutgoing || currentPhase is CallPhase.Active)) {
                             _uiFeedback.tryEmit("${sender.displayName} couldn't answer right now")
-                            val otherRemoteConnected = liveKitEngine.connectedLiveMembers.value
+                            val otherRemoteConnected = webRtcEngine.connectedLiveMembers.value
                                 .any { it != self && it != sender }
                             val isSoloCallToDecliner = _callState.value.participants.size <= 2
                             if (!otherRemoteConnected && isSoloCallToDecliner) {
@@ -929,7 +989,10 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     private fun startPresenceLoop() {
         presenceLoopJob?.cancel()
         presenceLoopJob = viewModelScope.launch {
-            var firstPing = true
+            var lastLoopMember: FamilyMemberId? = null
+            var lastLoopAvail: PresenceAvailability? = null
+            var lastLoopNote: String? = null
+            var lastDbUpsertMs = 0L
             while (true) {
                 runCatching {
                     val onlineNow = checkCurrentConnectivity()
@@ -941,18 +1004,29 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                     val (selfAvail, selfNote) = computeEffectiveSelfPresence()
                     if (owner != null && (isAppInForeground || isCallInProgress()) && onlineNow) {
                         updateSelfPresence(selfAvail, selfNote)
-                        realtimeSignaling.trackPresence(
-                            member = owner,
-                            availability = selfAvail,
-                            statusNote = selfNote,
-                            isHello = firstPing
-                        )
-                        viewModelScope.launch(Dispatchers.IO) {
-                            runCatching {
-                                syncRepo.upsertPresence(owner, isOnline = true, nowMs = now)
+                        val stateChanged = owner != lastLoopMember ||
+                            selfAvail != lastLoopAvail ||
+                            selfNote != lastLoopNote
+                        val needsReconnect = !realtimeSignaling.isSubscribed.value
+                        if (stateChanged || needsReconnect) {
+                            realtimeSignaling.trackPresence(
+                                member = owner,
+                                availability = selfAvail,
+                                statusNote = selfNote,
+                                isHello = lastLoopMember == null
+                            )
+                            lastLoopMember = owner
+                            lastLoopAvail = selfAvail
+                            lastLoopNote = selfNote
+                        }
+                        if (stateChanged || (now - lastDbUpsertMs) >= 45_000L) {
+                            lastDbUpsertMs = now
+                            viewModelScope.launch(Dispatchers.IO) {
+                                runCatching {
+                                    syncRepo.upsertPresence(owner, isOnline = true, nowMs = now)
+                                }
                             }
                         }
-                        firstPing = false
                     }
                     // Keep Realtime Presence authoritative; expire stale broadcast-only pings after 35s
                     val rtLive = realtimeSignaling.realtimePresenceMap.value
@@ -985,7 +1059,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                         }
                     }
                 }
-                delay(12_000L)
+                delay(15_000L)
             }
         }
     }
@@ -1033,11 +1107,9 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
             realtimeSignaling.connectIfConfigured(
                 member = owner,
                 availability = avail,
-                statusNote = note
+                statusNote = note,
+                sendHello = owner != null
             )
-            if (owner != null) {
-                realtimeSignaling.trackPresence(owner, avail, note, isHello = true)
-            }
             viewModelScope.launch(Dispatchers.IO) {
                 runCatching {
                     if (owner != null) {
@@ -1197,13 +1269,8 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
             realtimeSignaling.connectIfConfigured(
                 member = member,
                 availability = PresenceAvailability.ONLINE,
-                statusNote = null
-            )
-            realtimeSignaling.trackPresence(
-                member = member,
-                availability = PresenceAvailability.ONLINE,
                 statusNote = null,
-                isHello = true
+                sendHello = true
             )
             viewModelScope.launch(Dispatchers.IO) {
                 if (previousOwner != null && previousOwner != member) {
@@ -1354,14 +1421,14 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         )
     }
 
-    // --- Real-Time 3-Way Video & Voice Engine (LiveKit + Core-Telecom + Supabase Signaling) ---
+    // --- Real-Time 3-Way Video & Voice Engine (Native WebRTC PeerConnection Mesh + Supabase Signaling) ---
 
     fun startFamilyCall(targets: List<FamilyMemberId>, videoEnabled: Boolean = true) {
         recordUserInteraction()
         val self = _session.value.activeMember ?: FamilyMemberId.MITHUN
         val allInRoom = (listOf(self) + targets).distinct()
         val roomName = if (allInRoom.size >= 3) {
-            LiveKitCallEngine.DEFAULT_FAMILY_ROOM
+            WebRtcCallEngine.DEFAULT_FAMILY_ROOM
         } else {
             "holymoly-1on1-${allInRoom.map { it.name.lowercase() }.sorted().joinToString("-")}"
         }
@@ -1403,21 +1470,8 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
             videoEnabled = videoEnabled
         )
 
-        val primaryTarget = targets.firstOrNull { it != self } ?: targets.firstOrNull() ?: FamilyMemberId.MAFITHA
-        telecomManager.startManagedFamilyCall(
-            callerOrTarget = primaryTarget,
-            isIncoming = false,
-            isVideo = videoEnabled,
-            onAnswered = { connectCallMedia(allInRoom, roomName, videoEnabled) },
-            onDisconnected = { endCallInternal("Call ended", notifyRemote = true) }
-        )
-
-        viewModelScope.launch {
-            delay(350)
-            if (_callState.value.phase is CallPhase.DialingOutgoing) {
-                connectCallMedia(allInRoom, roomName, videoEnabled)
-            }
-        }
+        // Start native WebRTC mesh capture & signaling immediately (no Telecom audio conflict)
+        connectCallMedia(allInRoom, roomName, videoEnabled)
     }
 
     fun simulateIncomingCall(
@@ -1433,13 +1487,13 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         )
         _callState.update {
             it.copy(
-                roomName = LiveKitCallEngine.DEFAULT_FAMILY_ROOM,
+                roomName = WebRtcCallEngine.DEFAULT_FAMILY_ROOM,
                 isVoiceCallMode = !videoEnabled,
                 isLocalCameraOn = videoEnabled,
                 phase = CallPhase.RingingIncoming(
                     caller = caller,
                     isThreeWay = isThreeWay,
-                    roomName = LiveKitCallEngine.DEFAULT_FAMILY_ROOM,
+                    roomName = WebRtcCallEngine.DEFAULT_FAMILY_ROOM,
                     videoEnabled = videoEnabled
                 )
             )
@@ -1451,7 +1505,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         val incoming = _callState.value.phase as? CallPhase.RingingIncoming ?: return
         val self = _session.value.activeMember ?: FamilyMemberId.MAFITHA
         val useVideo = joinWithVideo ?: incoming.videoEnabled
-        val roomName = incoming.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM }
+        val roomName = incoming.roomName.ifBlank { WebRtcCallEngine.DEFAULT_FAMILY_ROOM }
         val members = if (incoming.isThreeWay) {
             listOf(self, FamilyMemberId.MITHUN, FamilyMemberId.MAFITHA, FamilyMemberId.ZAYN).distinct()
         } else {
@@ -1469,13 +1523,6 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                 networkQualityLabel = if (useVideo) "Joining video call…" else "Joining voice call…"
             )
         }
-        telecomManager.startManagedFamilyCall(
-            callerOrTarget = incoming.caller,
-            isIncoming = false,
-            isVideo = useVideo,
-            onAnswered = { },
-            onDisconnected = { endCallInternal("Call ended", notifyRemote = false) }
-        )
         connectCallMedia(members, roomName, useVideo)
     }
 
@@ -1516,7 +1563,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         realtimeSignaling.broadcastCallInvite(
             caller = self,
             targets = listOf(member),
-            roomName = currentState.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM },
+            roomName = currentState.roomName.ifBlank { WebRtcCallEngine.DEFAULT_FAMILY_ROOM },
             isThreeWay = true,
             videoEnabled = currentState.isLocalCameraOn || !currentState.isVoiceCallMode
         )
@@ -1571,9 +1618,10 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
             )
             startCallTimerAndWaveformLoop()
 
-            val connectResult = liveKitEngine.connectToFamilyRoom(
+            val connectResult = webRtcEngine.connectToFamilyRoom(
                 member = self,
                 roomName = roomName,
+                participants = members,
                 enableMic = !_callState.value.isLocalMicMuted,
                 enableCamera = _callState.value.isLocalCameraOn,
                 audioRoute = preferredRoute
@@ -1593,10 +1641,10 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
             CallForegroundService.start(appContext, label)
             viewModelScope.launch {
                 if (audioGranted && !state.isLocalMicMuted) {
-                    liveKitEngine.setMicrophoneEnabled(true)
+                    webRtcEngine.setMicrophoneEnabled(true)
                 }
                 if (cameraGranted && state.isLocalCameraOn) {
-                    liveKitEngine.setCameraEnabled(true)
+                    webRtcEngine.setCameraEnabled(true)
                 }
             }
         }
@@ -1607,7 +1655,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         callTimerJob = viewModelScope.launch {
             while (_callState.value.phase is CallPhase.Active || _callState.value.phase is CallPhase.Reconnecting) {
                 delay(1000)
-                val liveActive = liveKitEngine.isLiveStreamActive.value
+                val liveActive = webRtcEngine.isLiveStreamActive.value
                 _callState.update { state ->
                     val nextSec = state.durationSeconds + 1
                     if (liveActive) {
@@ -1631,7 +1679,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         val nextMuted = !_callState.value.isLocalMicMuted
         val self = _session.value.activeMember ?: FamilyMemberId.MITHUN
         viewModelScope.launch {
-            liveKitEngine.setMicrophoneEnabled(!nextMuted)
+            webRtcEngine.setMicrophoneEnabled(!nextMuted)
         }
         _callState.update { state ->
             state.copy(
@@ -1647,7 +1695,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         val nextOn = !_callState.value.isLocalCameraOn
         val self = _session.value.activeMember ?: FamilyMemberId.MITHUN
         viewModelScope.launch {
-            liveKitEngine.setCameraEnabled(nextOn)
+            webRtcEngine.setCameraEnabled(nextOn)
         }
         _callState.update { state ->
             state.copy(
@@ -1664,7 +1712,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     fun flipCamera() {
         if (!_callState.value.isLocalCameraOn) return
         val nextFront = !_callState.value.isFrontCamera
-        viewModelScope.launch { liveKitEngine.switchCamera() }
+        viewModelScope.launch { webRtcEngine.switchCamera() }
         _callState.update { it.copy(isFrontCamera = nextFront) }
     }
 
@@ -1674,7 +1722,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
             AudioRoute.BLUETOOTH -> AudioRoute.EARPIECE
             AudioRoute.EARPIECE -> AudioRoute.SPEAKER
         }
-        liveKitEngine.configureCommunicationAudio(next)
+        webRtcEngine.configureCommunicationAudio(next)
         _callState.update { it.copy(audioRoute = next) }
     }
 
@@ -1706,7 +1754,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                 }
             )
         }
-        viewModelScope.launch { liveKitEngine.broadcastArFilter(self, filter) }
+        viewModelScope.launch { webRtcEngine.broadcastArFilter(self, filter) }
     }
 
     fun toggleInCallDrawingOverlay() {
@@ -1724,7 +1772,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         )
         _callState.update { it.copy(activeEmojiBursts = (it.activeEmojiBursts + burst).takeLast(16)) }
         if (broadcast) {
-            viewModelScope.launch { liveKitEngine.broadcastEmojiBurst(sender, emoji, xFrac) }
+            viewModelScope.launch { webRtcEngine.broadcastEmojiBurst(sender, emoji, xFrac) }
         }
         viewModelScope.launch {
             delay(1900)
@@ -1737,7 +1785,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     fun triggerScreenTapRipple() {
         val self = _session.value.activeMember ?: FamilyMemberId.ZAYN
         viewModelScope.launch {
-            liveKitEngine.broadcastTapPulse(self)
+            webRtcEngine.broadcastTapPulse(self)
             _callState.update { it.copy(screenTapPulseMember = self) }
             delay(950)
             _callState.update { it.copy(screenTapPulseMember = null) }
@@ -1751,7 +1799,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
     private fun endCallInternal(reason: String, notifyRemote: Boolean = true) {
         val snapshot = _callState.value
         val self = _session.value.activeMember ?: FamilyMemberId.MITHUN
-        val remoteConnected = liveKitEngine.connectedLiveMembers.value.any { it != self }
+        val remoteConnected = webRtcEngine.connectedLiveMembers.value.any { it != self }
 
         // If nobody answered yet, cancel ringing on the other family phones
         if (notifyRemote && !remoteConnected && snapshot.phase !is CallPhase.Idle) {
@@ -1767,7 +1815,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
 
         callTimerJob?.cancel()
         telecomManager.endManagedCall()
-        liveKitEngine.disconnect()
+        webRtcEngine.disconnect()
         CallForegroundService.stop(appContext)
         val mins = snapshot.durationSeconds / 60
         val secs = snapshot.durationSeconds % 60
@@ -1803,7 +1851,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
                         id = callId,
                         caller_id = caller.name,
                         participants_csv = participantsCsv,
-                        room_name = snapshot.roomName.ifBlank { LiveKitCallEngine.DEFAULT_FAMILY_ROOM },
+                        room_name = snapshot.roomName.ifBlank { WebRtcCallEngine.DEFAULT_FAMILY_ROOM },
                         is_three_way = snapshot.participants.size >= 3,
                         duration_seconds = snapshot.durationSeconds,
                         started_at_ms = startedAtMs
@@ -2258,7 +2306,7 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         )
         _drawingStrokes.update { it + stroke }
         viewModelScope.launch {
-            liveKitEngine.broadcastDrawingStroke(strokeId, author, colorArgb, strokeWidthDp, points)
+            webRtcEngine.broadcastDrawingStroke(strokeId, author, colorArgb, strokeWidthDp, points)
         }
     }
 
@@ -2510,16 +2558,16 @@ class KinNestViewModel(application: Application) : AndroidViewModel(application)
         super.onCleared()
         presenceLoopJob?.cancel()
         realtimeSignaling.disconnectGracefully(offlineMember = _session.value.deviceOwner)
-        liveKitEngine.disconnect()
+        webRtcEngine.disconnect()
         voiceCapture.release()
         val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         networkCallback?.let { runCatching { cm.unregisterNetworkCallback(it) } }
     }
 
-    private data class LiveKitRoomSnapshot(
+    private data class WebRtcRoomSnapshot(
         val connected: Set<FamilyMemberId>,
         val speaking: Set<FamilyMemberId>,
-        val tracks: Map<FamilyMemberId, io.livekit.android.room.track.VideoTrack>,
+        val tracks: Map<FamilyMemberId, org.webrtc.VideoTrack>,
         val muted: Set<FamilyMemberId>,
         val liveActive: Boolean
     )

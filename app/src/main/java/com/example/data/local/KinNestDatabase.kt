@@ -100,7 +100,7 @@ abstract class KinNestDatabase : RoomDatabase() {
                 listOf(
                     UserProfileEntity(
                         memberId = FamilyMemberId.MITHUN.name,
-                        displayName = "Mithun",
+                        displayName = "Midhun",
                         roleLabel = "Vapi",
                         customPhotoUri = null,
                         badgeElement = BadgeElement.COMPASS.name,

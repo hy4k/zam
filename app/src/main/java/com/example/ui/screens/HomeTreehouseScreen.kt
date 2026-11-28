@@ -763,7 +763,7 @@ private fun AuthenticRetroClayRadio(
                                 label = "ON AIR",
                                 isLit = isRecording,
                                 litColor = ClayCoral,
-                                unlitColor = Color(0xFFD6AC92)
+                                unlitColor = Color(0xFFC4D7E8)
                             )
                             RadioJewelLed(
                                 label = if (effectiveUnlocked) "READY" else "LOCKED",
@@ -803,10 +803,10 @@ private fun AuthenticRetroClayRadio(
                             .height(54.dp)
                             .pastelRecessedWell(
                                 cornerRadius = 20.dp,
-                                surfaceColor = Color(0xFF1A4E52),
+                                surfaceColor = Color(0xFF14324A),
                                 shadowTint = ClayDeepTealInk
                             )
-                            .border(2.dp, ClayVanillaLight.copy(alpha = 0.82f), RoundedCornerShape(20.dp))
+                            .border(1.8.dp, ClayVanillaLight.copy(alpha = 0.82f), RoundedCornerShape(20.dp))
                             .padding(horizontal = 12.dp, vertical = 7.dp)
                     ) {
                         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -831,12 +831,12 @@ private fun AuthenticRetroClayRadio(
                                     val holeColor = if (isRecording && waveEnergy > 0.45f) {
                                         ClayHoneyLight.copy(alpha = 0.55f + waveEnergy * 0.45f)
                                     } else {
-                                        Color(0xFF0C2C2F)
+                                        Color(0xFF0B2033)
                                     }
 
                                     // Sunlit bottom-right bevel of each speaker perforation
                                     drawCircle(
-                                        color = ClayAquaLight.copy(alpha = 0.25f),
+                                        color = ClayHoneyLight.copy(alpha = 0.22f),
                                         radius = dotR,
                                         center = Offset(cx + 0.8f, cy + 1f)
                                     )
@@ -1044,7 +1044,7 @@ private fun AuthenticRetroClayRadio(
                             .size(226.dp)
                             .pastelRecessedWell(
                                 cornerRadius = 113.dp,
-                                surfaceColor = Color(0xFFEFC1A2),
+                                surfaceColor = Color(0xFFF2D6BE),
                                 shadowTint = ClayTealShadow
                             ),
                         contentAlignment = Alignment.Center
@@ -1176,7 +1176,7 @@ private fun AuthenticRetroClayRadio(
                                 // Main Vanilla-Cream sculpted clay rotary disc
                                 drawCircle(
                                     brush = Brush.radialGradient(
-                                        colors = listOf(ClayVanillaLight, ClayVanilla, Color(0xFFF3DEC0)),
+                                        colors = listOf(ClayVanillaLight, ClayVanilla, Color(0xFFFFEFE2)),
                                         center = Offset(center.x - r * 0.25f, center.y - r * 0.25f),
                                         radius = r * 1.45f
                                     ),

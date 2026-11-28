@@ -21,7 +21,7 @@ enum class FamilyMemberId(
 fun FamilyMemberId.defaultAvatarRes(): Int = when (this) {
     FamilyMemberId.MITHUN -> R.drawable.img_avatar_mithun
     FamilyMemberId.MAFITHA -> R.drawable.img_avatar_mafitha
-    FamilyMemberId.ZAYN -> R.drawable.img_avatar_zayn
+    FamilyMemberId.ZAYN -> R.drawable.img_zayn_welcome_portrait
 }
 
 fun FamilyMemberId.haloColor(): Color = when (this) {
@@ -97,10 +97,10 @@ enum class PresenceAvailability(val label: String) {
 }
 
 fun PresenceAvailability.statusColor(): Color = when (this) {
-    PresenceAvailability.ONLINE -> Color(0xFF10B981)
-    PresenceAvailability.AWAY -> Color(0xFFF5A623)
-    PresenceAvailability.BUSY -> Color(0xFFF06458)
-    PresenceAvailability.OFFLINE -> Color(0xFFAABFC1)
+    PresenceAvailability.ONLINE -> Color(0xFF4F7B55)   // Botanical Studio Sage
+    PresenceAvailability.AWAY -> Color(0xFFC99043)     // Warm Honey Oak
+    PresenceAvailability.BUSY -> Color(0xFFC25B44)     // Earthy Terracotta
+    PresenceAvailability.OFFLINE -> Color(0xFFA89989)  // Warm Stone
 }
 
 data class MemberPresenceStatus(
@@ -236,7 +236,7 @@ data class OfflineSyncState(
     val isSyncingNow: Boolean = false,
     val lastSyncedLabel: String = "Synced just now",
     val supabaseConfigured: Boolean = false,
-    val liveKitConfigured: Boolean = false
+    val webRtcSignalingConfigured: Boolean = false
 )
 
 @Serializable

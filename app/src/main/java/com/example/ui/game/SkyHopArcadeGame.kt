@@ -541,13 +541,13 @@ fun SkyHopArcadeGame(
                 val tick = engine.frameTick
                 val worldT = engine.elapsedWorld
 
-                // Atmospheric Pixar Studio Sky Gradient (Mint-Teal -> Soft Peach Horizon -> Warm Cream Cloud Floor)
+                // Warm Golden-Hour Atelier Sky Gradient (Honey-Oak Dusk -> Warm Oat Sand -> Cream Cloud Floor)
                 drawRect(
                     brush = Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.0f to Color(0xFF4AA9A5),
-                            0.46f to Color(0xFF7CD0C9),
-                            0.80f to Color(0xFFFDE2C8),
+                            0.0f to Color(0xFFB58C5A),
+                            0.44f to Color(0xFFDAB98E),
+                            0.78f to Color(0xFFF3E2C8),
                             1.0f to ClayVanilla
                         )
                     )
@@ -572,12 +572,12 @@ fun SkyHopArcadeGame(
 
                 // Soft Clay Rolling Hills along the very bottom horizon
                 drawCircle(
-                    color = Color(0xFF9AD9CE).copy(alpha = 0.7f),
+                    color = Color(0xFFDDC7AA).copy(alpha = 0.75f),
                     radius = size.width * 0.52f,
                     center = Offset(size.width * 0.22f, size.height * 1.15f)
                 )
                 drawCircle(
-                    color = ClayPeach.copy(alpha = 0.65f),
+                    color = ClayPeach.copy(alpha = 0.72f),
                     radius = size.width * 0.48f,
                     center = Offset(size.width * 0.80f, size.height * 1.18f)
                 )
@@ -889,6 +889,8 @@ fun SkyHopArcadeGame(
                             fontSize = 42.sp,
                             letterSpacing = 0.5.sp
                         ),
+                        textColor = ClayTextCream,
+                        extrudeColor = ClayDeepTealInk,
                         depthDp = 3.2.dp,
                         textAlign = TextAlign.Center
                     )
@@ -1199,8 +1201,8 @@ private fun DrawScope.drawClayHeart(center: Offset, radius: Float) {
 }
 
 private fun DrawScope.drawStormClayCloud(center: Offset, r: Float, isZigZag: Boolean, pulse: Float) {
-    val darkCloud = if (isZigZag) Color(0xFF284359) else Color(0xFF2B5960)
-    val rimCloud = if (isZigZag) Color(0xFF476C8C) else Color(0xFF4A7E84)
+    val darkCloud = if (isZigZag) Color(0xFF4A3426) else Color(0xFF5C4231)
+    val rimCloud = if (isZigZag) Color(0xFF785A45) else Color(0xFF8C6B53)
 
     // Little golden-coral lightning bolt peeking beneath the storm cloud!
     val bolt = Path().apply {

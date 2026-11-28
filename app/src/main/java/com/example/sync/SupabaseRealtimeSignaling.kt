@@ -19,6 +19,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -63,6 +64,25 @@ data class FamilyRealtimeSignal(
     val timestampMs: Long = 0L
 )
 
+@Serializable
+data class WebRtcSignalEnvelope(
+    val type: String, // JOIN, JOIN_ACK, ROOM_FULL, PEER_HEARTBEAT, ICE_RESTART_REQ, OFFER, ANSWER, ICE, LEAVE, MEDIA_STATE, DATA_PACKET
+    val roomName: String,
+    val senderId: String,
+    val targetId: String = "",
+    val sessionId: String = "",
+    val peerIdsCsv: String = "",
+    val reason: String = "",
+    val sdp: String = "",
+    val iceMid: String = "",
+    val iceMLineIndex: Int = 0,
+    val iceCandidate: String = "",
+    val cameraEnabled: Boolean = true,
+    val micEnabled: Boolean = true,
+    val dataPayload: String = "",
+    val timestampMs: Long = 0L
+)
+
 data class RealtimePresenceEntry(
     val memberId: FamilyMemberId,
     val availability: PresenceAvailability,
@@ -86,6 +106,7 @@ class SupabaseRealtimeSignaling {
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + coroutineErrorHandler)
     private val connectionMutex = Mutex()
+    private val presenceMutex = Mutex()
 
     @Volatile
     private var shouldStayConnected = false
@@ -101,7 +122,19 @@ class SupabaseRealtimeSignaling {
 
     private var channel: RealtimeChannel? = null
     private var broadcastCollectorJob: Job? = null
+    private var webRtcCollectorJob: Job? = null
     private var presenceCollectorJob: Job? = null
+    private var pendingPresenceJob: Job? = null
+
+    // Tracks the last state actually sent to Supabase Realtime Presence on the current channel
+    // so identical/burst calls never exceed Supabase's client presence rate limit.
+    private var lastTrackedChannel: RealtimeChannel? = null
+    private var lastTrackedMember: FamilyMemberId? = null
+    private var lastTrackedAvailability: PresenceAvailability? = null
+    private var lastTrackedStatusNote: String? = null
+    private var lastTrackSentAtMs: Long = 0L
+    private var lastBroadcastSignature: String? = null
+    private var lastBroadcastSentAtMs: Long = 0L
 
     // Tracks presence entries keyed by Supabase presence key so multi-tab/reconnect leaves stay accurate
     private val activePresenceByKey = ConcurrentHashMap<String, RealtimePresenceEntry>()
@@ -111,6 +144,9 @@ class SupabaseRealtimeSignaling {
 
     private val _incomingSignals = MutableSharedFlow<FamilyRealtimeSignal>(extraBufferCapacity = 48)
     val incomingSignals: SharedFlow<FamilyRealtimeSignal> = _incomingSignals.asSharedFlow()
+
+    private val _incomingWebRtcSignals = MutableSharedFlow<WebRtcSignalEnvelope>(extraBufferCapacity = 128)
+    val incomingWebRtcSignals: SharedFlow<WebRtcSignalEnvelope> = _incomingWebRtcSignals.asSharedFlow()
 
     private val _realtimePresenceMap = MutableStateFlow<Map<FamilyMemberId, RealtimePresenceEntry>>(emptyMap())
     val realtimePresenceMap: StateFlow<Map<FamilyMemberId, RealtimePresenceEntry>> =
@@ -150,7 +186,8 @@ class SupabaseRealtimeSignaling {
     fun connectIfConfigured(
         member: FamilyMemberId? = trackedMember,
         availability: PresenceAvailability = trackedAvailability,
-        statusNote: String? = trackedStatusNote
+        statusNote: String? = trackedStatusNote,
+        sendHello: Boolean = false
     ) {
         if (!isConfigured()) return
         if (member != null) {
@@ -165,6 +202,9 @@ class SupabaseRealtimeSignaling {
                 val m = trackedMember
                 if (active != null && m != null) {
                     pushPresenceTrackInternal(active, m, trackedAvailability, trackedStatusNote)
+                    if (sendHello) {
+                        broadcastPresenceIfAllowed(active, m, trackedAvailability, trackedStatusNote, isHello = true)
+                    }
                 }
             }.onFailure { err ->
                 Log.w(TAG, "connectIfConfigured failed", err)
@@ -184,8 +224,11 @@ class SupabaseRealtimeSignaling {
         return runCatching {
             broadcastCollectorJob?.cancel()
             broadcastCollectorJob = null
+            webRtcCollectorJob?.cancel()
+            webRtcCollectorJob = null
             presenceCollectorJob?.cancel()
             presenceCollectorJob = null
+            resetPresenceTrackingState()
             runCatching { supabase.realtime.removeAllChannels() }
 
             val presenceKey = trackedMember?.name ?: "family_device_${System.currentTimeMillis()}"
@@ -201,6 +244,9 @@ class SupabaseRealtimeSignaling {
             val broadcastFlow = runCatching {
                 realtimeChannel.broadcastFlow<FamilyRealtimeSignal>(event = SIGNAL_EVENT)
             }.getOrNull()
+            val webRtcFlow = runCatching {
+                realtimeChannel.broadcastFlow<WebRtcSignalEnvelope>(event = WEBRTC_SIGNAL_EVENT)
+            }.getOrNull()
             val presenceFlow = runCatching {
                 realtimeChannel.presenceChangeFlow()
             }.getOrNull()
@@ -215,6 +261,20 @@ class SupabaseRealtimeSignaling {
                             }
                             .collect { payload ->
                                 _incomingSignals.tryEmit(payload)
+                            }
+                    }
+                }
+            }
+
+            if (webRtcFlow != null) {
+                webRtcCollectorJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    runCatching {
+                        webRtcFlow
+                            .catch { err ->
+                                Log.w(TAG, "WebRTC broadcast flow error", err)
+                            }
+                            .collect { envelope ->
+                                _incomingWebRtcSignals.tryEmit(envelope)
                             }
                     }
                 }
@@ -304,32 +364,152 @@ class SupabaseRealtimeSignaling {
         _realtimePresenceMap.value = grouped
     }
 
+    private suspend fun resetPresenceTrackingState() {
+        presenceMutex.withLock {
+            pendingPresenceJob?.cancel()
+            pendingPresenceJob = null
+            lastTrackedChannel = null
+            lastTrackedMember = null
+            lastTrackedAvailability = null
+            lastTrackedStatusNote = null
+        }
+    }
+
     private suspend fun pushPresenceTrackInternal(
         activeChannel: RealtimeChannel,
         member: FamilyMemberId,
         availability: PresenceAvailability,
         statusNote: String?
     ) {
-        val now = System.currentTimeMillis()
-        runCatching {
-            if (availability == PresenceAvailability.OFFLINE) {
-                activeChannel.untrack()
-            } else {
-                activeChannel.track(
-                    buildJsonObject {
-                        put("member_id", member.name)
-                        put("status", availability.name)
-                        put("note", statusNote.orEmpty())
-                        put("updated_at_ms", now)
-                    }
-                )
+        val normalizedNote = statusNote?.takeIf { it.isNotBlank() }
+        var delayToScheduleMs: Long? = null
+
+        presenceMutex.withLock {
+            if (!shouldStayConnected || channel !== activeChannel || !_isSubscribed.value) {
+                return
             }
+
+            // Skip redundant track() calls when the server already holds this exact presence state.
+            val sameStateOnSameChannel = lastTrackedChannel === activeChannel &&
+                lastTrackedMember == member &&
+                lastTrackedAvailability == availability &&
+                lastTrackedStatusNote == normalizedNote
+            if (sameStateOnSameChannel) {
+                pendingPresenceJob?.cancel()
+                pendingPresenceJob = null
+                return
+            }
+
+            // If we haven't tracked anything on this channel yet, no need to call untrack() for OFFLINE.
+            if (availability == PresenceAvailability.OFFLINE &&
+                (lastTrackedChannel !== activeChannel || lastTrackedAvailability == PresenceAvailability.OFFLINE)
+            ) {
+                lastTrackedChannel = activeChannel
+                lastTrackedMember = member
+                lastTrackedAvailability = PresenceAvailability.OFFLINE
+                lastTrackedStatusNote = null
+                return
+            }
+
+            val now = System.currentTimeMillis()
+            val elapsed = now - lastTrackSentAtMs
+            if (lastTrackSentAtMs > 0L && elapsed < MIN_PRESENCE_TRACK_INTERVAL_MS) {
+                delayToScheduleMs = MIN_PRESENCE_TRACK_INTERVAL_MS - elapsed
+            } else {
+                pendingPresenceJob?.cancel()
+                pendingPresenceJob = null
+                val succeeded = runCatching {
+                    if (availability == PresenceAvailability.OFFLINE) {
+                        activeChannel.untrack()
+                    } else {
+                        activeChannel.track(
+                            buildJsonObject {
+                                put("member_id", member.name)
+                                put("status", availability.name)
+                                put("note", normalizedNote.orEmpty())
+                                put("updated_at_ms", now)
+                            }
+                        )
+                    }
+                    true
+                }.onFailure { err ->
+                    Log.w(TAG, "Presence track/untrack failed", err)
+                }.getOrDefault(false)
+
+                if (succeeded) {
+                    lastTrackedChannel = activeChannel
+                    lastTrackedMember = member
+                    lastTrackedAvailability = availability
+                    lastTrackedStatusNote = normalizedNote
+                    lastTrackSentAtMs = System.currentTimeMillis()
+                }
+            }
+        }
+
+        // Coalesce rapid state changes into a single trailing track() once the cooldown elapses.
+        val waitMs = delayToScheduleMs
+        if (waitMs != null) {
+            presenceMutex.withLock {
+                if (pendingPresenceJob?.isActive != true) {
+                    pendingPresenceJob = scope.launch {
+                        delay(waitMs)
+                        val latestChannel = channel
+                        val latestMember = trackedMember
+                        if (shouldStayConnected && latestChannel != null && _isSubscribed.value && latestMember != null) {
+                            pushPresenceTrackInternal(
+                                activeChannel = latestChannel,
+                                member = latestMember,
+                                availability = trackedAvailability,
+                                statusNote = trackedStatusNote
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun broadcastPresenceIfAllowed(
+        activeChannel: RealtimeChannel,
+        member: FamilyMemberId,
+        availability: PresenceAvailability,
+        statusNote: String?,
+        isHello: Boolean
+    ) {
+        val normalizedNote = statusNote?.takeIf { it.isNotBlank() }.orEmpty()
+        val signature = "${member.name}|${availability.name}|$normalizedNote|$isHello"
+        val now = System.currentTimeMillis()
+        val shouldSend = presenceMutex.withLock {
+            val sameRecent = signature == lastBroadcastSignature &&
+                (now - lastBroadcastSentAtMs) < MIN_PRESENCE_BROADCAST_INTERVAL_MS
+            if (sameRecent) {
+                false
+            } else {
+                lastBroadcastSignature = signature
+                lastBroadcastSentAtMs = now
+                true
+            }
+        }
+        if (!shouldSend) return
+
+        val broadcastPayload = FamilyRealtimeSignal(
+            kind = if (availability == PresenceAvailability.OFFLINE) KIND_PRESENCE_OFFLINE else KIND_PRESENCE_PING,
+            senderId = member.name,
+            text = if (isHello) "HELLO" else availability.name,
+            presenceStatus = availability.name,
+            statusNote = normalizedNote,
+            timestampMs = now
+        )
+        runCatching {
+            activeChannel.broadcast(event = SIGNAL_EVENT, message = broadcastPayload)
+        }.onFailure { err ->
+            Log.w(TAG, "Presence broadcast failed", err)
         }
     }
 
     /**
      * Tracks the member's live status ('Online', 'Away', or 'Busy') in Supabase Realtime Presence
-     * AND broadcasts an immediate presence update so all 3 family phones reflect changes instantly.
+     * (deduplicated and rate-limited) and broadcasts a lightweight status signal on changes.
      */
     fun trackPresence(
         member: FamilyMemberId,
@@ -342,16 +522,6 @@ class SupabaseRealtimeSignaling {
         trackedStatusNote = statusNote
         if (!isConfigured() || !shouldStayConnected) return
 
-        val now = System.currentTimeMillis()
-        val broadcastPayload = FamilyRealtimeSignal(
-            kind = if (availability == PresenceAvailability.OFFLINE) KIND_PRESENCE_OFFLINE else KIND_PRESENCE_PING,
-            senderId = member.name,
-            text = if (isHello) "HELLO" else availability.name,
-            presenceStatus = availability.name,
-            statusNote = statusNote.orEmpty(),
-            timestampMs = now
-        )
-
         scope.launch {
             runCatching {
                 val activeChannel = if (channel != null && _isSubscribed.value) {
@@ -360,7 +530,33 @@ class SupabaseRealtimeSignaling {
                     ensureConnectedInternal()
                 } ?: return@launch
                 pushPresenceTrackInternal(activeChannel, member, availability, statusNote)
-                activeChannel.broadcast(event = SIGNAL_EVENT, message = broadcastPayload)
+                broadcastPresenceIfAllowed(activeChannel, member, availability, statusNote, isHello = isHello)
+            }
+        }
+    }
+
+    /**
+     * Replies to another member's HELLO ping with a lightweight broadcast only — does NOT call
+     * Realtime Presence `track()` because native Presence already syncs tracked state on join.
+     */
+    fun broadcastPresenceReplyOnly(
+        member: FamilyMemberId,
+        availability: PresenceAvailability,
+        statusNote: String? = null
+    ) {
+        if (!isConfigured() || !shouldStayConnected) return
+        scope.launch {
+            runCatching {
+                val activeChannel = channel
+                if (activeChannel != null && _isSubscribed.value) {
+                    broadcastPresenceIfAllowed(
+                        activeChannel = activeChannel,
+                        member = member,
+                        availability = availability,
+                        statusNote = statusNote,
+                        isHello = false
+                    )
+                }
             }
         }
     }
@@ -566,10 +762,60 @@ class SupabaseRealtimeSignaling {
                 val activeChannel = channel
                 if (activeChannel != null && _isSubscribed.value) {
                     withTimeoutOrNull(1_200L) {
-                        runCatching { activeChannel.untrack() }
+                        val shouldUntrack = presenceMutex.withLock {
+                            val hadTracked = lastTrackedChannel === activeChannel &&
+                                lastTrackedAvailability != null &&
+                                lastTrackedAvailability != PresenceAvailability.OFFLINE
+                            if (hadTracked) {
+                                lastTrackedAvailability = PresenceAvailability.OFFLINE
+                                lastTrackSentAtMs = System.currentTimeMillis()
+                            }
+                            hadTracked
+                        }
+                        if (shouldUntrack) {
+                            runCatching { activeChannel.untrack() }
+                        }
                         activeChannel.broadcast(event = SIGNAL_EVENT, message = payload)
                     }
                 }
+            }
+        }
+    }
+
+    suspend fun ensureSubscribedForCall(): Boolean {
+        if (!isConfigured()) return false
+        shouldStayConnected = true
+        return ensureConnectedInternal() != null
+    }
+
+    /**
+     * Forces a fresh WebSocket subscribe after a Wi-Fi <-> Cellular handoff so stale sockets
+     * never stall WebRTC ICE restart signaling.
+     */
+    suspend fun reconnectForNetworkSwitch(): Boolean {
+        if (!isConfigured()) return false
+        shouldStayConnected = true
+        connectionMutex.withLock {
+            _isSubscribed.value = false
+            runCatching { channel?.unsubscribe() }
+            channel = null
+        }
+        return ensureConnectedInternal() != null
+    }
+
+    fun sendWebRtcSignal(envelope: WebRtcSignalEnvelope) {
+        if (!isConfigured()) return
+        shouldStayConnected = true
+        scope.launch {
+            runCatching {
+                val activeChannel = if (channel != null && _isSubscribed.value) {
+                    channel
+                } else {
+                    ensureConnectedInternal()
+                }
+                activeChannel?.broadcast(event = WEBRTC_SIGNAL_EVENT, message = envelope)
+            }.onFailure { err ->
+                Log.w(TAG, "sendWebRtcSignal(${envelope.type}) failed", err)
             }
         }
     }
@@ -603,7 +849,14 @@ class SupabaseRealtimeSignaling {
                 if (offlineMember != null && activeChannel != null && _isSubscribed.value) {
                     runCatching {
                         withTimeoutOrNull(1_000L) {
-                            runCatching { activeChannel.untrack() }
+                            val shouldUntrack = presenceMutex.withLock {
+                                lastTrackedChannel === activeChannel &&
+                                    lastTrackedAvailability != null &&
+                                    lastTrackedAvailability != PresenceAvailability.OFFLINE
+                            }
+                            if (shouldUntrack) {
+                                runCatching { activeChannel.untrack() }
+                            }
                             activeChannel.broadcast(
                                 event = SIGNAL_EVENT,
                                 message = FamilyRealtimeSignal(
@@ -621,8 +874,11 @@ class SupabaseRealtimeSignaling {
                         }
                     }
                 }
+                resetPresenceTrackingState()
                 broadcastCollectorJob?.cancel()
                 broadcastCollectorJob = null
+                webRtcCollectorJob?.cancel()
+                webRtcCollectorJob = null
                 presenceCollectorJob?.cancel()
                 presenceCollectorJob = null
                 activePresenceByKey.clear()
@@ -644,6 +900,9 @@ class SupabaseRealtimeSignaling {
         private const val TAG = "SupabaseRealtime"
         private const val FAMILY_SIGNAL_CHANNEL = "holymoly-family-signal"
         private const val SIGNAL_EVENT = "family_signal"
+        private const val WEBRTC_SIGNAL_EVENT = "webrtc_signal"
+        private const val MIN_PRESENCE_TRACK_INTERVAL_MS = 2_500L
+        private const val MIN_PRESENCE_BROADCAST_INTERVAL_MS = 5_000L
 
         const val KIND_CALL_INVITE = "CALL_INVITE"
         const val KIND_CALL_DECLINE = "CALL_DECLINE"

@@ -78,26 +78,26 @@ import com.example.data.model.MessageType
 import com.example.data.model.UserSessionState
 import com.example.ui.components.FamilyMemberAvatar
 
-// Exact Login Page 3D Claymorphism & Royal Cobalt Palette (sampled directly from AvatarLoginScreen)
-private val ChatCardIvoryTop = Color(0xFFF6EFEF)
-private val ChatCardIvoryMid = Color(0xFFEDE3D9)
-private val ChatCardIvoryBottom = Color(0xFFEAE0DD)
-private val ChatTrayIvoryTop = Color(0xFFF7F2F0)
-private val ChatTrayIvoryMid = Color(0xFFF0E9E7)
-private val ChatTrayIvoryBottom = Color(0xFFE7DFDC)
-private val ChatRecessedWellTop = Color(0xFFE2D9D6)
-private val ChatRecessedWellMid = Color(0xFFEDE6E3)
-private val ChatRecessedWellBottom = Color(0xFFF5F0EE)
-private val ChatRoyalBrandBlue = Color(0xFF1553D6)
-private val ChatRoyalBlueLight = Color(0xFF428BFF)
-private val ChatRoyalBlueCore = Color(0xFF1D62EC)
-private val ChatRoyalBlueDeep = Color(0xFF1043BE)
-private val ChatSubtitleNavy = Color(0xFF365592)
-private val ChatInputTextNavy = Color(0xFF1A3263)
-private val ChatPlaceholderSlate = Color(0xFF6B7792)
-private val ChatAmbientBlueShadow = Color(0xFF0F2D7A)
-private val ChatSoftInnerShadow = Color(0xFF5A4E60)
-private val ChatGoldAccent = Color(0xFFF5B82E)
+// Warm Cream, Oat Sand & Carved Walnut Espresso Palette (matching the architectural Welcome Doorway reference)
+private val ChatCardIvoryTop = Color(0xFFFDF9F3)
+private val ChatCardIvoryMid = Color(0xFFF6EDE0)
+private val ChatCardIvoryBottom = Color(0xFFEEE2D1)
+private val ChatTrayIvoryTop = Color(0xFFFDF9F3)
+private val ChatTrayIvoryMid = Color(0xFFF5ECE0)
+private val ChatTrayIvoryBottom = Color(0xFFEBE0D0)
+private val ChatRecessedWellTop = Color(0xFFE3D5C2)
+private val ChatRecessedWellMid = Color(0xFFECE0CE)
+private val ChatRecessedWellBottom = Color(0xFFF6EFE4)
+private val ChatRoyalBrandBlue = Color(0xFF5A3B24)      // Carved Walnut Espresso
+private val ChatRoyalBlueLight = Color(0xFF7D5638)      // Sunlit Oak Walnut
+private val ChatRoyalBlueCore = Color(0xFF5A3B24)       // Deep Walnut Wood
+private val ChatRoyalBlueDeep = Color(0xFF3B2415)       // Roasted Espresso Base
+private val ChatSubtitleNavy = Color(0xFF5E4A3B)        // Warm Umber
+private val ChatInputTextNavy = Color(0xFF251B14)       // Deep Espresso Ink
+private val ChatPlaceholderSlate = Color(0xFF84705E)    // Muted Taupe
+private val ChatAmbientBlueShadow = Color(0xFF3D2717)   // Warm Walnut Shadow
+private val ChatSoftInnerShadow = Color(0xFF5C422E)     // Soft Umber Inner Shadow
+private val ChatGoldAccent = Color(0xFFD9AE74)          // Brushed Brass / Honey Oak
 
 private data class ChatThreadOption(val id: String, val label: String)
 
@@ -262,17 +262,17 @@ fun ChatBubbleScreen(
                                 brush = if (isSelf) {
                                     Brush.verticalGradient(
                                         listOf(
-                                            Color.White.copy(alpha = 0.62f),
-                                            Color.White.copy(alpha = 0.16f),
-                                            Color(0xFF0A2C82).copy(alpha = 0.62f)
+                                            Color.White.copy(alpha = 0.42f),
+                                            Color.White.copy(alpha = 0.12f),
+                                            Color(0xFF28160C).copy(alpha = 0.55f)
                                         )
                                     )
                                 } else {
                                     Brush.linearGradient(
                                         listOf(
-                                            Color.White.copy(alpha = 0.96f),
-                                            Color(0xFFFDF8F6).copy(alpha = 0.60f),
-                                            Color(0xFFC9B7B3).copy(alpha = 0.46f)
+                                            Color.White.copy(alpha = 0.94f),
+                                            Color(0xFFF3E8D8).copy(alpha = 0.72f),
+                                            Color(0xFFD3BFA6).copy(alpha = 0.65f)
                                         )
                                     )
                                 },
@@ -312,9 +312,9 @@ fun ChatBubbleScreen(
                                         fontWeight = FontWeight.ExtraBold,
                                         letterSpacing = (-0.1).sp,
                                         shadow = if (isSelf) {
-                                            Shadow(Color(0x330A2A78), Offset(0f, 1.5f), 3f)
+                                            Shadow(Color(0x33261409), Offset(0f, 1.5f), 3f)
                                         } else {
-                                            Shadow(Color(0x22103B9E), Offset(0f, 1.5f), 3f)
+                                            Shadow(Color(0x18382314), Offset(0f, 1.5f), 2f)
                                         }
                                     ),
                                     color = if (isSelf) Color.White else ChatRoyalBrandBlue
@@ -459,12 +459,12 @@ fun ChatBubbleScreen(
                                             .clip(CircleShape)
                                             .background(
                                                 if (isPicked) {
-                                                    Brush.verticalGradient(listOf(Color.White, Color(0xFFE3EEFF)))
+                                                    Brush.verticalGradient(listOf(Color(0xFFFFFBF4), Color(0xFFF1E2CC)))
                                                 } else {
                                                     Brush.verticalGradient(
                                                         listOf(
-                                                            Color.White.copy(alpha = if (isSelf) 0.26f else 0.96f),
-                                                            Color(0xFFE7E0DD).copy(alpha = if (isSelf) 0.18f else 0.92f)
+                                                            Color.White.copy(alpha = if (isSelf) 0.24f else 0.96f),
+                                                            Color(0xFFE7D9C6).copy(alpha = if (isSelf) 0.16f else 0.92f)
                                                         )
                                                     )
                                                 }
@@ -723,16 +723,16 @@ private fun ChatLoginStyleThreadPill(
                 brush = if (selected) {
                     Brush.verticalGradient(
                         listOf(
-                            Color.White.copy(alpha = 0.65f),
-                            Color.White.copy(alpha = 0.16f),
-                            Color(0xFF0A2C82).copy(alpha = 0.65f)
+                            Color.White.copy(alpha = 0.45f),
+                            Color.White.copy(alpha = 0.14f),
+                            Color(0xFF28160C).copy(alpha = 0.55f)
                         )
                     )
                 } else {
                     Brush.verticalGradient(
                         listOf(
-                            Color.White.copy(alpha = 0.96f),
-                            Color(0xFFD6CBC8).copy(alpha = 0.62f)
+                            Color.White.copy(alpha = 0.94f),
+                            Color(0xFFD5C1A8).copy(alpha = 0.72f)
                         )
                     )
                 },
@@ -824,9 +824,9 @@ private fun ChatGlossyBlueMedallion(
                 width = 1.5.dp,
                 brush = Brush.verticalGradient(
                     listOf(
-                        Color.White.copy(alpha = 0.72f),
+                        Color.White.copy(alpha = 0.52f),
                         Color.White.copy(alpha = 0.14f),
-                        Color(0xFF0A2E8A).copy(alpha = 0.55f)
+                        Color(0xFF28160C).copy(alpha = 0.55f)
                     )
                 ),
                 shape = CircleShape

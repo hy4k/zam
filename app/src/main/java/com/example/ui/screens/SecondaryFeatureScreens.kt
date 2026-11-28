@@ -513,7 +513,7 @@ fun AdventureMissionScreen(
                 )
                 .padding(6.dp)
                 .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xFF15383C))
+                .background(Color(0xFF241810))
         ) {
             if (hasCameraPerm) {
                 CameraXLivePreview(

@@ -36,12 +36,15 @@ import com.example.data.local.UserProfileEntity
 import com.example.data.model.BadgeElement
 import com.example.data.model.FamilyMemberId
 import com.example.ui.components.ClayActionButton
+import com.example.ui.components.ClayTextOnLight
 import com.example.ui.components.FamilyMemberAvatar
 import com.example.ui.components.KinNestAmbientCanvas
 import com.example.ui.components.Text3D
 import com.example.ui.theme.ClayAqua
 import com.example.ui.theme.ClayCoral
+import com.example.ui.theme.ClayDeepTealInk
 import com.example.ui.theme.ClayHoney
+import com.example.ui.theme.ClayMutedInk
 import com.example.ui.theme.ClayPeach
 import com.example.ui.theme.ClaySage
 import com.example.ui.theme.ClayTealShadow
@@ -153,20 +156,22 @@ fun IncomingCallOverlayScreen(
                         )
                     }
 
-                    Text3D(
+                    ClayTextOnLight(
                         text = "${caller.displayName} (${caller.title})",
-                        style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.ExtraBold),
-                        depthDp = 2.8.dp,
+                        style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+                        textColor = ClayDeepTealInk,
+                        depthDp = 0.8.dp,
                         textAlign = TextAlign.Center
                     )
-                    Text3D(
+                    ClayTextOnLight(
                         text = if (videoEnabled) {
                             "Video calling on Holy Moly ! • Tap Accept to join"
                         } else {
                             "Voice calling on Holy Moly ! • Tap Accept to talk"
                         },
-                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
-                        depthDp = 1.6.dp,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                        textColor = ClayMutedInk,
+                        depthDp = 0.dp,
                         textAlign = TextAlign.Center
                     )
                 }

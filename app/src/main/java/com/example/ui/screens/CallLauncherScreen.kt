@@ -67,6 +67,7 @@ import com.example.ui.theme.ClayTextCream
 import com.example.ui.theme.ClayVanilla
 import com.example.ui.theme.ClayVanillaLight
 import com.example.ui.theme.LocalKinNestAccessibility
+import com.example.ui.theme.VibrantViolet
 import com.example.ui.theme.clayDisc3D
 import com.example.ui.theme.clayPressScale
 import com.example.ui.theme.claymorphic
@@ -399,7 +400,7 @@ fun CallLauncherScreen(
                     otherMembers.forEachIndexed { idx, target ->
                         val prof = profiles.firstOrNull { it.memberId == target.name }
                         val presence = memberPresence[target] ?: MemberPresenceStatus(target)
-                        val clayTint = if (idx == 0) ClaySage else ClayAqua
+                        val clayTint = if (idx == 0) ClaySage else VibrantViolet
                         CompactStudioClayCallTile(
                             title = target.displayName.substringBefore(" "),
                             statusSubtitle = presence.shortBadgeLabel(),

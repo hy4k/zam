@@ -1,5 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <item name="livekit_video_renderer" type="id" />
     <item name="camerax_live_preview" type="id" />
 </resources>

@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -56,8 +57,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
@@ -79,18 +83,19 @@ import com.example.data.model.statusColor
 import com.example.ui.WorkspaceTab
 import com.example.ui.theme.ClayAqua
 import com.example.ui.theme.ClayAquaDeep
-import com.example.ui.theme.ClayCocoaInk
+import com.example.ui.theme.ClayAquaLight
 import com.example.ui.theme.ClayCoral
 import com.example.ui.theme.ClayCoralDeep
+import com.example.ui.theme.ClayCoralLight
 import com.example.ui.theme.ClayDeepTealInk
 import com.example.ui.theme.ClayHoney
 import com.example.ui.theme.ClayHoneyDeep
 import com.example.ui.theme.ClayHoneyLight
 import com.example.ui.theme.ClayMutedInk
 import com.example.ui.theme.ClayPeach
-import com.example.ui.theme.ClayPeachLight
+import com.example.ui.theme.ClayPeachDeep
 import com.example.ui.theme.ClaySage
-import com.example.ui.theme.ClaySageDeep
+import com.example.ui.theme.ClaySageLight
 import com.example.ui.theme.ClayTealShadow
 import com.example.ui.theme.ClayTealWallBottom
 import com.example.ui.theme.ClayTealWallMid
@@ -98,23 +103,22 @@ import com.example.ui.theme.ClayTealWallTop
 import com.example.ui.theme.ClayTextCream
 import com.example.ui.theme.ClayTextPeachExtrude
 import com.example.ui.theme.ClayTextTealCast
-import com.example.ui.theme.ClayVanilla
 import com.example.ui.theme.ClayVanillaLight
 import com.example.ui.theme.DarkBackgroundBottom
 import com.example.ui.theme.DarkBackgroundTop
 import com.example.ui.theme.EmeraldAccept
 import com.example.ui.theme.LocalKinNestAccessibility
+import com.example.ui.theme.VibrantViolet
+import com.example.ui.theme.VibrantVioletDeep
+import com.example.ui.theme.VibrantYellow
 import com.example.ui.theme.clayDisc3D
 import com.example.ui.theme.clayPressScale
 import com.example.ui.theme.claymorphic
 import com.example.ui.theme.liquidGlass
 
 /**
- * SIGNATURE 3D EXTRUDED CLAY TYPOGRAPHY ("What is a feeling?" style from the attached image!):
- * Multi-layered molded 3D letters with:
- *  - Soft cast drop shadow down-left/down
- *  - Thick peach/warm clay extruded side thickness (stepped 3D body)
- *  - Crisp pure Cream-White front face (use on Teal, Coral, Aqua, Honey surfaces!)
+ * Refined Sculpted Light-on-Dark Typography for Carved Walnut, Terracotta, Honey Oak, and Sage surfaces.
+ * Clean, sharp, warm editorial depth without visual clutter.
  */
 @Composable
 fun Text3D(
@@ -123,15 +127,15 @@ fun Text3D(
     modifier: Modifier = Modifier,
     textColor: Color = ClayTextCream,
     extrudeColor: Color = ClayTextPeachExtrude,
-    castShadowColor: Color = ClayTextTealCast.copy(alpha = 0.56f),
-    depthDp: Dp = 2.2.dp,
+    castShadowColor: Color = ClayTextTealCast.copy(alpha = 0.36f),
+    depthDp: Dp = 1.2.dp,
     textAlign: TextAlign? = null,
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = TextOverflow.Clip
 ) {
+    val subtleDepth = (depthDp * 0.55f).coerceAtMost(1.4.dp)
     Box(modifier = modifier) {
-        if (depthDp > 0.dp) {
-            // Layer 1: Soft directional studio cast shadow (floating off the clay wall)
+        if (subtleDepth > 0.dp) {
             Text(
                 text = text,
                 style = style.copy(shadow = null),
@@ -139,38 +143,17 @@ fun Text3D(
                 textAlign = textAlign,
                 maxLines = maxLines,
                 overflow = overflow,
-                modifier = Modifier.offset(x = -depthDp * 0.45f, y = depthDp * 1.45f)
-            )
-            // Layer 2: Outer 3D molded clay thickness edge (warm peach depth)
-            Text(
-                text = text,
-                style = style.copy(shadow = null),
-                color = extrudeColor,
-                textAlign = textAlign,
-                maxLines = maxLines,
-                overflow = overflow,
-                modifier = Modifier.offset(x = depthDp * 0.25f, y = depthDp * 0.92f)
-            )
-            // Layer 3: Mid 3D extruded clay step (smooth solid 3D lettering extrusion!)
-            Text(
-                text = text,
-                style = style.copy(shadow = null),
-                color = extrudeColor.copy(alpha = 0.88f),
-                textAlign = textAlign,
-                maxLines = maxLines,
-                overflow = overflow,
-                modifier = Modifier.offset(x = depthDp * 0.12f, y = depthDp * 0.46f)
+                modifier = Modifier.offset(y = subtleDepth)
             )
         }
-        // Layer 4: Sunlit Crisp Front Face
         Text(
             text = text,
             style = style.copy(
-                shadow = if (depthDp > 0.dp) {
+                shadow = if (subtleDepth > 0.dp) {
                     Shadow(
-                        color = castShadowColor.copy(alpha = 0.32f),
-                        offset = Offset(0f, 2f),
-                        blurRadius = 3f
+                        color = extrudeColor.copy(alpha = 0.28f),
+                        offset = Offset(0f, 1.5f),
+                        blurRadius = 2.5f
                     )
                 } else null
             ),
@@ -183,9 +166,8 @@ fun Text3D(
 }
 
 /**
- * High-Contrast Molded 3D Clay Text for Light Peach-Cream & Vanilla Clay Surfaces:
- * Guarantees 100% visibility on light peach/cream cards with a crisp top highlight
- * and deep ocean-teal/cocoa sculpted 3D depth!
+ * High-Contrast Warm Editorial Espresso Ink Typography for Alabaster Cream & Oat-Sand Surfaces.
+ * Guaranteed razor-sharp legibility matching the studio reference image.
  */
 @Composable
 fun ClayTextOnLight(
@@ -193,48 +175,35 @@ fun ClayTextOnLight(
     style: TextStyle = MaterialTheme.typography.titleMedium,
     modifier: Modifier = Modifier,
     textColor: Color = ClayDeepTealInk,
-    depthDp: Dp = 1.6.dp,
+    depthDp: Dp = 0.8.dp,
     textAlign: TextAlign? = null,
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = TextOverflow.Clip
 ) {
-    Box(modifier = modifier) {
-        // Subtle sunlit white inner emboss rim
-        Text(
-            text = text,
-            style = style.copy(shadow = null),
-            color = Color.White.copy(alpha = 0.72f),
-            textAlign = textAlign,
-            maxLines = maxLines,
-            overflow = overflow,
-            modifier = Modifier.offset(y = (-depthDp * 0.5f))
-        )
-        // Sculpted 3D drop depth
-        Text(
-            text = text,
-            style = style.copy(shadow = null),
-            color = Color(0x2E15494E),
-            textAlign = textAlign,
-            maxLines = maxLines,
-            overflow = overflow,
-            modifier = Modifier.offset(x = depthDp * 0.35f, y = depthDp)
-        )
-        // Razor-sharp Deep Teal / Cocoa Front Face
-        Text(
-            text = text,
-            style = style.copy(shadow = null),
-            color = textColor,
-            textAlign = textAlign,
-            maxLines = maxLines,
-            overflow = overflow
-        )
-    }
+    Text(
+        text = text,
+        style = style.copy(
+            shadow = if (depthDp > 0.5.dp) {
+                Shadow(
+                    color = Color(0x1613263C),
+                    offset = Offset(0f, 1.2f),
+                    blurRadius = 2f
+                )
+            } else null
+        ),
+        color = textColor,
+        textAlign = textAlign,
+        maxLines = maxLines,
+        overflow = overflow,
+        modifier = modifier
+    )
 }
 
 /**
- * SIGNATURE STUDIO MINT-TEAL CLAY BACKDROP (exact match for the attached image!):
- * Smooth matte Mint-Teal gradient wall with subtle warm cream floor glow at the bottom
- * and scattered 3D honey-gold clay floating dots/coins.
+ * VIBRANT 3D CLAY STUDIO CANVAS:
+ * Bright pastel aqua-to-lavender sunlit studio backdrop with soft luminous pastel bokeh orbs
+ * and tiny joyful floating clay confetti dots along the outer margins (matching the 3D reference style
+ * while keeping the center ultra-clean and crisp for iPhone-grade legibility).
  */
 @Composable
 fun KinNestAmbientCanvas(
@@ -245,17 +214,16 @@ fun KinNestAmbientCanvas(
         Brush.verticalGradient(
             colorStops = arrayOf(
                 0.0f to DarkBackgroundTop,
-                0.65f to DarkBackgroundBottom,
-                1.0f to Color(0xFF132F33)
+                0.55f to DarkBackgroundBottom,
+                1.0f to Color(0xFF1A1E36)
             )
         )
     } else {
         Brush.verticalGradient(
             colorStops = arrayOf(
                 0.0f to ClayTealWallTop,
-                0.38f to ClayTealWallMid,
-                0.86f to ClayTealWallBottom,
-                1.0f to Color(0xFF9AD9CE)
+                0.48f to ClayTealWallMid,
+                1.0f to ClayTealWallBottom
             )
         )
     }
@@ -268,63 +236,83 @@ fun KinNestAmbientCanvas(
         Canvas(modifier = Modifier.fillMaxSize()) {
             if (size.width <= 0f || size.height <= 0f) return@Canvas
 
-            // Soft studio spotlight bloom from upper right (matching the reference lighting)
+            // Upper-left bright sky-cyan sunlit glow
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        if (darkTheme) ClayAqua.copy(alpha = 0.16f) else Color(0xFFA6E5DE).copy(alpha = 0.55f),
+                        if (darkTheme) ClayAqua.copy(alpha = 0.14f) else ClayAquaLight.copy(alpha = 0.24f),
                         Color.Transparent
                     ),
-                    center = Offset(size.width * 0.78f, size.height * 0.14f),
+                    center = Offset(size.width * 0.12f, size.height * 0.08f),
                     radius = size.width * 0.72f
                 ),
-                center = Offset(size.width * 0.78f, size.height * 0.14f),
+                center = Offset(size.width * 0.12f, size.height * 0.08f),
                 radius = size.width * 0.72f
             )
 
-            // Warm vanilla-cream floor glow at the very bottom (matching reference studio shelf)
-            drawRect(
-                brush = Brush.verticalGradient(
+            // Upper-right warm peach-mango studio glow
+            drawCircle(
+                brush = Brush.radialGradient(
                     colors = listOf(
-                        Color.Transparent,
-                        if (darkTheme) Color(0x22F7A633) else ClayVanilla.copy(alpha = 0.55f)
+                        if (darkTheme) ClayHoney.copy(alpha = 0.12f) else ClayHoneyLight.copy(alpha = 0.22f),
+                        Color.Transparent
                     ),
-                    startY = size.height * 0.86f,
-                    endY = size.height
-                )
+                    center = Offset(size.width * 0.90f, size.height * 0.16f),
+                    radius = size.width * 0.66f
+                ),
+                center = Offset(size.width * 0.90f, size.height * 0.16f),
+                radius = size.width * 0.66f
             )
 
-            // Subtle floating 3D honey-gold clay coins/dots scattered gently like the reference!
-            val dots = listOf(
-                Triple(0.10f, 0.16f, 6.dp.toPx()),
-                Triple(0.89f, 0.13f, 8.dp.toPx()),
-                Triple(0.08f, 0.42f, 9.dp.toPx()),
-                Triple(0.92f, 0.48f, 7.dp.toPx()),
-                Triple(0.13f, 0.70f, 8.dp.toPx()),
-                Triple(0.87f, 0.74f, 6.dp.toPx()),
-                Triple(0.24f, 0.25f, 4.dp.toPx()),
-                Triple(0.76f, 0.30f, 4.5.dp.toPx())
+            // Lower-right playful periwinkle lavender ambient aura
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        if (darkTheme) VibrantViolet.copy(alpha = 0.16f) else VibrantViolet.copy(alpha = 0.18f),
+                        Color.Transparent
+                    ),
+                    center = Offset(size.width * 0.86f, size.height * 0.88f),
+                    radius = size.width * 0.78f
+                ),
+                center = Offset(size.width * 0.86f, size.height * 0.88f),
+                radius = size.width * 0.78f
             )
-            val coinAlpha = if (darkTheme) 0.35f else 0.72f
-            dots.forEach { (fx, fy, r) ->
-                val cx = size.width * fx
-                val cy = size.height * fy
+
+            // Lower-left soft mint seafoam bokeh glow
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        if (darkTheme) ClaySage.copy(alpha = 0.12f) else ClaySageLight.copy(alpha = 0.20f),
+                        Color.Transparent
+                    ),
+                    center = Offset(size.width * 0.10f, size.height * 0.78f),
+                    radius = size.width * 0.60f
+                ),
+                center = Offset(size.width * 0.10f, size.height * 0.78f),
+                radius = size.width * 0.60f
+            )
+
+            // Cheerful subtle 3D clay confetti dots in the outer margins (inspired by Reference Image 2)
+            val dotAlpha = if (darkTheme) 0.24f else 0.36f
+            val confetti = listOf(
+                Triple(Offset(size.width * 0.07f, size.height * 0.14f), 4.5.dp.toPx(), VibrantYellow),
+                Triple(Offset(size.width * 0.93f, size.height * 0.11f), 5.dp.toPx(), ClayCoralLight),
+                Triple(Offset(size.width * 0.95f, size.height * 0.34f), 4.dp.toPx(), ClayAqua),
+                Triple(Offset(size.width * 0.05f, size.height * 0.44f), 4.5.dp.toPx(), ClayCoralLight),
+                Triple(Offset(size.width * 0.94f, size.height * 0.64f), 5.dp.toPx(), VibrantViolet),
+                Triple(Offset(size.width * 0.06f, size.height * 0.74f), 4.dp.toPx(), ClayHoneyLight),
+                Triple(Offset(size.width * 0.91f, size.height * 0.84f), 4.5.dp.toPx(), ClaySage)
+            )
+            confetti.forEach { (pos, radius, tint) ->
                 drawCircle(
-                    color = ClayTealShadow.copy(alpha = 0.22f * coinAlpha),
-                    radius = r,
-                    center = Offset(cx - 1.5.dp.toPx(), cy + 2.5.dp.toPx())
+                    color = tint.copy(alpha = dotAlpha),
+                    radius = radius,
+                    center = pos
                 )
                 drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            ClayHoneyLight.copy(alpha = coinAlpha),
-                            ClayHoney.copy(alpha = coinAlpha)
-                        ),
-                        center = Offset(cx - r * 0.3f, cy - r * 0.3f),
-                        radius = r * 1.4f
-                    ),
-                    radius = r,
-                    center = Offset(cx, cy)
+                    color = Color.White.copy(alpha = dotAlpha * 0.85f),
+                    radius = radius * 0.36f,
+                    center = Offset(pos.x - radius * 0.26f, pos.y - radius * 0.26f)
                 )
             }
         }
@@ -333,8 +321,7 @@ fun KinNestAmbientCanvas(
 }
 
 /**
- * SIGNATURE 3D MATTE CLAY CIRCULAR BUTTON (modeled directly on the floating clay discs
- * with molded 3D raised icons in the attached studio image!).
+ * Refined Sculpted Circular Studio Button (matte oat-sand, honey oak, or carved walnut disc).
  */
 @Composable
 fun ClayCircleButton(
@@ -342,7 +329,7 @@ fun ClayCircleButton(
     contentDescription: String,
     clayColor: Color = ClayPeach,
     iconTint: Color = ClayAqua,
-    size: Dp = 52.dp,
+    size: Dp = 50.dp,
     testTag: String,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
@@ -354,45 +341,31 @@ fun ClayCircleButton(
             .clayPressScale(reducedMotion = a11y.reducedMotion)
             .clayDisc3D(
                 surfaceColor = clayColor,
-                elevation = 12.dp,
+                elevation = 8.dp,
                 shadowTint = ClayTealShadow,
-                ledgeDepth = 4.dp
+                ledgeDepth = 3.dp
             )
             .clickable(onClick = onClick)
             .testTag(testTag),
         contentAlignment = Alignment.Center
     ) {
-        // Raised 3D molded icon shadow + crisp front icon
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = Color(0x3D1B4D50),
-            modifier = Modifier
-                .offset(x = (-0.8).dp, y = 2.dp)
-                .size(size * 0.48f)
-        )
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = iconTint,
-            modifier = Modifier
-                .offset(y = (-1).dp)
-                .size(size * 0.48f)
+            modifier = Modifier.size(size * 0.46f)
         )
     }
 }
 
-/**
- * Compatibility delegate for PlushCircleButton -> sleek Pixar 3D Matte Clay Circle Button.
- */
 @Composable
 fun PlushCircleButton(
     icon: ImageVector,
     contentDescription: String,
     plushColor: Color,
-    iconTint: Color = Color.White,
-    size: Dp = 52.dp,
-    furLength: Dp = 4.dp,
+    iconTint: Color = ClayTextCream,
+    size: Dp = 50.dp,
+    furLength: Dp = 3.dp,
     testTag: String,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
@@ -415,8 +388,8 @@ fun PastelClayCircleButton(
     contentDescription: String,
     topColor: Color,
     bottomColor: Color,
-    iconTint: Color = Color.White,
-    size: Dp = 50.dp,
+    iconTint: Color = ClayTextCream,
+    size: Dp = 48.dp,
     testTag: String,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
@@ -434,9 +407,7 @@ fun PastelClayCircleButton(
 }
 
 /**
- * SIGNATURE 3D MATTE CLAY PILL ACTION BUTTON:
- * Smooth velvety clay button with molded 3D bottom lip, tactile spring press,
- * and guaranteed-legible 3D extruded typography!
+ * Refined Editorial Pill Action Button (soft sand, carved walnut, terracotta, or sage).
  */
 @Composable
 fun ClayActionButton(
@@ -446,14 +417,11 @@ fun ClayActionButton(
     icon: ImageVector? = null,
     testTag: String,
     modifier: Modifier = Modifier,
-    minHeight: Dp = 54.dp,
+    minHeight: Dp = 52.dp,
     onClick: () -> Unit
 ) {
     val a11y = LocalKinNestAccessibility.current
-    val isLightSurface = containerColor == ClayPeach ||
-        containerColor == ClayPeachLight ||
-        containerColor == ClayVanilla ||
-        containerColor == ClayVanillaLight
+    val isLightSurface = containerColor.luminance() > 0.68f
     val resolvedTextColor = if (isLightSurface) ClayDeepTealInk else contentColor
 
     Box(
@@ -463,13 +431,13 @@ fun ClayActionButton(
             .claymorphic(
                 cornerRadius = minHeight / 2,
                 surfaceColor = containerColor,
-                elevation = 12.dp,
+                elevation = 8.dp,
                 shadowTint = ClayTealShadow,
-                ledgeDepth = 5.dp
+                ledgeDepth = 3.5.dp
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 18.dp)
-            .padding(bottom = 3.dp)
+            .padding(bottom = 2.dp)
             .testTag(testTag),
         contentAlignment = Alignment.Center
     ) {
@@ -478,32 +446,22 @@ fun ClayActionButton(
             horizontalArrangement = Arrangement.Center
         ) {
             if (icon != null) {
-                Box {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = Color(0x3816484C),
-                        modifier = Modifier
-                            .offset(y = 1.5.dp)
-                            .size(20.dp)
-                    )
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = resolvedTextColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = resolvedTextColor,
+                    modifier = Modifier.size(19.dp)
+                )
                 Spacer(modifier = Modifier.width(8.dp))
             }
             if (isLightSurface) {
                 ClayTextOnLight(
                     text = text,
                     style = MaterialTheme.typography.labelLarge.copy(
-                        fontWeight = FontWeight.ExtraBold
+                        fontWeight = FontWeight.Bold
                     ),
                     textColor = resolvedTextColor,
-                    depthDp = 1.3.dp,
+                    depthDp = 0.6.dp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -511,11 +469,11 @@ fun ClayActionButton(
                 Text3D(
                     text = text,
                     style = MaterialTheme.typography.labelLarge.copy(
-                        fontWeight = FontWeight.ExtraBold
+                        fontWeight = FontWeight.Bold
                     ),
                     textColor = resolvedTextColor,
-                    extrudeColor = Color(0x665E241C),
-                    depthDp = 1.6.dp,
+                    extrudeColor = Color(0x38102840),
+                    depthDp = 1.dp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -532,8 +490,8 @@ fun PlushActionButton(
     icon: ImageVector? = null,
     testTag: String,
     modifier: Modifier = Modifier,
-    minHeight: Dp = 54.dp,
-    furLength: Dp = 4.dp,
+    minHeight: Dp = 52.dp,
+    furLength: Dp = 3.dp,
     onClick: () -> Unit
 ) {
     ClayActionButton(
@@ -564,22 +522,27 @@ fun EditorialSectionHeader(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .size(width = 18.dp, height = 5.dp)
+                        .size(width = 16.dp, height = 3.dp)
                         .clip(CircleShape)
                         .background(accentColor)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Text3D(
+                ClayTextOnLight(
                     text = eyebrow.uppercase(),
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold),
-                    depthDp = 1.2.dp
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    ),
+                    textColor = ClayMutedInk,
+                    depthDp = 0.dp
                 )
             }
             Spacer(modifier = Modifier.height(2.dp))
-            Text3D(
+            ClayTextOnLight(
                 text = title,
-                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.ExtraBold),
-                depthDp = 2.2.dp
+                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                textColor = ClayDeepTealInk,
+                depthDp = 0.6.dp
             )
         }
         if (trailing != null) {
@@ -602,7 +565,7 @@ fun FamilyMemberAvatar(
     val halo = member.haloColor()
     val resolvedDotColor: Color? = when {
         availability != null -> availability.statusColor()
-        isOnline != null -> if (isOnline) EmeraldAccept else Color(0xFFAABFC1)
+        isOnline != null -> if (isOnline) EmeraldAccept else Color(0xFF9FB0C2)
         else -> null
     }
     Box(
@@ -613,17 +576,17 @@ fun FamilyMemberAvatar(
             modifier = Modifier
                 .fillMaxSize()
                 .shadow(
-                    elevation = 8.dp,
+                    elevation = 6.dp,
                     shape = CircleShape,
-                    ambientColor = ClayTealShadow.copy(alpha = 0.42f),
-                    spotColor = ClayTealShadow.copy(alpha = 0.42f)
+                    ambientColor = ClayTealShadow.copy(alpha = 0.24f),
+                    spotColor = ClayTealShadow.copy(alpha = 0.24f)
                 )
                 .clip(CircleShape)
                 .background(ClayVanillaLight)
-                .border(2.8.dp, ClayVanillaLight, CircleShape)
-                .padding(2.5.dp)
+                .border(2.2.dp, ClayVanillaLight, CircleShape)
+                .padding(2.dp)
                 .clip(CircleShape)
-                .background(halo.copy(alpha = 0.24f))
+                .background(halo.copy(alpha = 0.16f))
         ) {
             if (!customPhotoUri.isNullOrBlank()) {
                 AsyncImage(
@@ -642,7 +605,7 @@ fun FamilyMemberAvatar(
             }
         }
         if (resolvedDotColor != null) {
-            val dotSize = (size * 0.25f).coerceIn(10.dp, 16.dp)
+            val dotSize = (size * 0.24f).coerceIn(10.dp, 15.dp)
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -656,16 +619,16 @@ fun FamilyMemberAvatar(
             Surface(
                 shape = CircleShape,
                 color = ClayVanillaLight,
-                shadowElevation = 6.dp,
+                shadowElevation = 4.dp,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .size(size * 0.36f)
-                    .border(1.8.dp, halo, CircleShape)
+                    .size(size * 0.35f)
+                    .border(1.4.dp, ClayPeachDeep, CircleShape)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
                         text = badge.emoji,
-                        fontSize = (size.value * 0.19f).sp
+                        fontSize = (size.value * 0.18f).sp
                     )
                 }
             }
@@ -674,10 +637,10 @@ fun FamilyMemberAvatar(
 }
 
 /**
- * SIGNATURE STUDIO CLAY-GLASS BOTTOM DOCK:
- * Smooth frosted vanilla-cream clay-glass pill tray housing 4 sculpted 3D Matte Clay
- * circular disc buttons (Peach-Cream resting discs with molded colored icons, popping into
- * rich 3D Coral / Aqua / Honey / Sage clay spheres when active!).
+ * VIBRANT iOS-SMOOTH FLOATING FROSTED GLASS BOTTOM DOCK:
+ * Crisp porcelain frosted glass pill with 4 juicy 3D clay medallions
+ * (Sky Cyan, Joyful Coral, Tangerine Orange, Periwinkle Lavender),
+ * spring lift physics, animated color transitions, active capsule indicator, and tactile haptics.
  */
 @Composable
 fun KinNestToyBottomDock(
@@ -687,6 +650,7 @@ fun KinNestToyBottomDock(
     modifier: Modifier = Modifier
 ) {
     val a11y = LocalKinNestAccessibility.current
+    val haptic = LocalHapticFeedback.current
 
     Box(
         modifier = modifier
@@ -698,12 +662,12 @@ fun KinNestToyBottomDock(
             modifier = Modifier
                 .fillMaxWidth()
                 .liquidGlass(
-                    shape = RoundedCornerShape(34.dp),
-                    surfaceAlpha = 0.86f,
+                    shape = RoundedCornerShape(30.dp),
+                    surfaceAlpha = 0.94f,
                     tintColor = ClayVanillaLight,
-                    cornerRadius = 34.dp
+                    cornerRadius = 30.dp
                 )
-                .padding(horizontal = 10.dp, vertical = 8.dp)
+                .padding(horizontal = 10.dp, vertical = 7.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -714,24 +678,39 @@ fun KinNestToyBottomDock(
                     val isSelected = tab == selectedTab
                     val style = tabClayStyle(tab)
                     val orbScale by animateFloatAsState(
-                        targetValue = if (isSelected && !a11y.reducedMotion) 1.12f else 0.96f,
-                        animationSpec = spring(dampingRatio = 0.56f, stiffness = 420f),
+                        targetValue = if (isSelected && !a11y.reducedMotion) 1.09f else 0.95f,
+                        animationSpec = spring(dampingRatio = 0.58f, stiffness = 460f),
                         label = "clay_orb_scale_${tab.name}"
                     )
                     val orbLift by animateFloatAsState(
-                        targetValue = if (isSelected && !a11y.reducedMotion) -3.5f else 0f,
-                        animationSpec = spring(dampingRatio = 0.6f, stiffness = 420f),
+                        targetValue = if (isSelected && !a11y.reducedMotion) -3.0f else 0f,
+                        animationSpec = spring(dampingRatio = 0.62f, stiffness = 460f),
                         label = "clay_orb_lift_${tab.name}"
+                    )
+                    val discColor by animateColorAsState(
+                        targetValue = if (isSelected) style.activeClay else ClayPeach,
+                        animationSpec = tween(durationMillis = if (a11y.reducedMotion) 0 else 220),
+                        label = "clay_orb_color_${tab.name}"
+                    )
+                    val iconColor by animateColorAsState(
+                        targetValue = if (isSelected) ClayTextCream else style.activeLabelInk.copy(alpha = 0.85f),
+                        animationSpec = tween(durationMillis = if (a11y.reducedMotion) 0 else 220),
+                        label = "clay_orb_icon_${tab.name}"
                     )
 
                     Column(
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(22.dp))
+                            .clip(RoundedCornerShape(20.dp))
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
-                                onClick = { onSelectTab(tab) }
+                                onClick = {
+                                    if (!isSelected) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    }
+                                    onSelectTab(tab)
+                                }
                             )
                             .padding(vertical = 2.dp)
                             .testTag("tab_${tab.name.lowercase()}"),
@@ -747,34 +726,22 @@ fun KinNestToyBottomDock(
                                 },
                             contentAlignment = Alignment.Center
                         ) {
-                            // Sculpted 3D Clay Disc (Warm Peach-Cream with Aqua/Coral/Honey icon when resting;
-                            // solid sculpted Coral/Aqua/Honey/Sage clay sphere with Cream icon when active!)
                             Box(
                                 modifier = Modifier
-                                    .size(46.dp)
+                                    .size(44.dp)
                                     .clayDisc3D(
-                                        surfaceColor = if (isSelected) style.activeClay else ClayPeach,
-                                        elevation = if (isSelected) 12.dp else 6.dp,
-                                        shadowTint = ClayTealShadow,
-                                        ledgeDepth = if (isSelected) 4.dp else 3.dp
+                                        surfaceColor = discColor,
+                                        elevation = if (isSelected) 10.dp else 4.dp,
+                                        shadowTint = if (isSelected) style.activeClay else ClayTealShadow,
+                                        ledgeDepth = if (isSelected) 3.2.dp else 2.dp
                                     ),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = style.icon,
-                                    contentDescription = null,
-                                    tint = Color(0x30174B4F),
-                                    modifier = Modifier
-                                        .offset(y = 1.5.dp)
-                                        .size(23.dp)
-                                )
-                                Icon(
-                                    imageVector = style.icon,
                                     contentDescription = tab.accessibleTitle,
-                                    tint = if (isSelected) ClayTextCream else style.activeClay,
-                                    modifier = Modifier
-                                        .offset(y = (-0.8).dp)
-                                        .size(23.dp)
+                                    tint = iconColor,
+                                    modifier = Modifier.size(21.dp)
                                 )
                             }
 
@@ -783,35 +750,41 @@ fun KinNestToyBottomDock(
                                     modifier = Modifier
                                         .align(Alignment.TopEnd)
                                         .offset(x = 3.dp, y = (-2).dp)
-                                        .size(19.dp)
+                                        .size(18.dp)
                                         .clip(CircleShape)
                                         .background(ClayCoral)
-                                        .border(1.8.dp, ClayVanillaLight, CircleShape),
+                                        .border(1.6.dp, ClayVanillaLight, CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text3D(
                                         text = unreadCount.coerceAtMost(9).toString(),
                                         style = MaterialTheme.typography.labelSmall.copy(
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.ExtraBold
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold
                                         ),
-                                        depthDp = 0.8.dp
+                                        depthDp = 0.6.dp
                                     )
                                 }
                             }
                         }
 
-                        // Always 100% legible Deep Teal / Active Clay label on the cream-glass dock
                         ClayTextOnLight(
                             text = tab.label,
                             style = MaterialTheme.typography.labelSmall.copy(
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.ExtraBold
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium
                             ),
                             textColor = if (isSelected) style.activeLabelInk else ClayMutedInk,
-                            depthDp = if (isSelected) 1.2.dp else 0.7.dp,
+                            depthDp = 0.dp,
                             maxLines = 1,
                             overflow = TextOverflow.Clip
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .size(width = if (isSelected) 16.dp else 0.dp, height = 3.dp)
+                                .clip(CircleShape)
+                                .background(style.activeClay)
                         )
                     }
                 }
@@ -826,7 +799,7 @@ fun KinNestNavigationRail(
     onSelectTab: (WorkspaceTab) -> Unit
 ) {
     NavigationRail(
-        containerColor = ClayVanilla.copy(alpha = 0.94f)
+        containerColor = ClayVanillaLight.copy(alpha = 0.96f)
     ) {
         Spacer(modifier = Modifier.height(16.dp))
         WorkspaceTab.entries.forEach { tab ->
@@ -845,7 +818,7 @@ fun KinNestNavigationRail(
                     Text(
                         text = tab.label,
                         color = ClayDeepTealInk,
-                        fontWeight = FontWeight.ExtraBold
+                        fontWeight = FontWeight.Bold
                     )
                 },
                 modifier = Modifier.testTag("rail_${tab.name.lowercase()}")
@@ -863,13 +836,13 @@ private data class TabClayStyle(
 private fun tabClayStyle(tab: WorkspaceTab): TabClayStyle = when (tab) {
     WorkspaceTab.HOME -> TabClayStyle(
         icon = Icons.Rounded.CellTower,
-        activeClay = ClayCoral,
-        activeLabelInk = ClayCoralDeep
+        activeClay = ClayAqua,
+        activeLabelInk = ClayAquaDeep
     )
     WorkspaceTab.CALL -> TabClayStyle(
         icon = Icons.Rounded.Call,
-        activeClay = ClayAqua,
-        activeLabelInk = ClayAquaDeep
+        activeClay = ClayCoral,
+        activeLabelInk = ClayCoralDeep
     )
     WorkspaceTab.CHAT -> TabClayStyle(
         icon = Icons.Rounded.Forum,
@@ -878,8 +851,8 @@ private fun tabClayStyle(tab: WorkspaceTab): TabClayStyle = when (tab) {
     )
     WorkspaceTab.PLAY -> TabClayStyle(
         icon = Icons.Rounded.GridView,
-        activeClay = ClaySage,
-        activeLabelInk = ClaySageDeep
+        activeClay = VibrantViolet,
+        activeLabelInk = VibrantVioletDeep
     )
 }
 
@@ -901,13 +874,13 @@ fun OfflineAndQuietStatusBanners(
                 modifier = Modifier
                     .fillMaxWidth()
                     .claymorphic(
-                        cornerRadius = 22.dp,
-                        surfaceColor = if (isWarn) ClayHoney else ClayVanilla,
-                        elevation = 8.dp,
-                        ledgeDepth = 4.dp
+                        cornerRadius = 18.dp,
+                        surfaceColor = if (isWarn) ClayHoney else ClayVanillaLight,
+                        elevation = 6.dp,
+                        ledgeDepth = 2.5.dp
                     )
                     .clickable(onClick = onRetrySync)
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                    .padding(horizontal = 14.dp, vertical = 9.dp)
                     .testTag("offline_sync_banner"),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -922,24 +895,24 @@ fun OfflineAndQuietStatusBanners(
                         Text3D(
                             text = if (!syncState.isOnline) "No internet right now — saved for later" else "Some messages are waiting to send",
                             style = MaterialTheme.typography.labelLarge,
-                            depthDp = 1.2.dp
+                            depthDp = 0.8.dp
                         )
                         Text3D(
                             text = if (syncState.failedQueueCount > 0) "Tap to try again" else syncState.lastSyncedLabel,
                             style = MaterialTheme.typography.bodySmall,
-                            depthDp = 0.9.dp
+                            depthDp = 0.6.dp
                         )
                     } else {
                         ClayTextOnLight(
                             text = "Sending family updates…",
                             style = MaterialTheme.typography.labelLarge,
-                            depthDp = 1.dp
+                            depthDp = 0.4.dp
                         )
                         ClayTextOnLight(
                             text = syncState.lastSyncedLabel,
                             style = MaterialTheme.typography.bodySmall,
                             textColor = ClayMutedInk,
-                            depthDp = 0.7.dp
+                            depthDp = 0.dp
                         )
                     }
                 }
@@ -951,10 +924,10 @@ fun OfflineAndQuietStatusBanners(
                 modifier = Modifier
                     .fillMaxWidth()
                     .liquidGlass(
-                        shape = RoundedCornerShape(22.dp),
-                        surfaceAlpha = 0.86f,
+                        shape = RoundedCornerShape(18.dp),
+                        surfaceAlpha = 0.92f,
                         tintColor = ClayVanillaLight,
-                        cornerRadius = 22.dp
+                        cornerRadius = 18.dp
                     )
                     .padding(horizontal = 14.dp, vertical = 8.dp)
                     .testTag("quiet_hours_banner"),
@@ -963,14 +936,14 @@ fun OfflineAndQuietStatusBanners(
                 Icon(
                     imageVector = Icons.Rounded.Bedtime,
                     contentDescription = "Quiet Hours active",
-                    tint = ClayAquaDeep
+                    tint = ClayAqua
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 ClayTextOnLight(
                     text = "Quiet Hours On — Soft chimes only",
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                     textColor = ClayDeepTealInk,
-                    depthDp = 1.dp
+                    depthDp = 0.dp
                 )
             }
         }
